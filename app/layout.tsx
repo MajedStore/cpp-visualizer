@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'مُصوِّر C++',
+  title: 'C++ Visualizer',
   description: 'شاهد تنفيذ كود C++ سطراً بسطر: المؤشرات كأسهم، الـ Stack والـ Heap، new و delete.',
 };
 
