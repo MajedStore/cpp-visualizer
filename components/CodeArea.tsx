@@ -82,7 +82,7 @@ export default function CodeArea({ code, onChange, readOnly, curLine, nextLine, 
             const mark = n === errLine ? '✖' : n === curLine ? '➜' : n === nextLine ? '→' : '';
             const mc = n === errLine ? 'err' : n === curLine ? 'cur' : n === nextLine ? 'next' : '';
             return (
-              <div className="ln" key={n} onClick={onLineClick ? () => onLineClick(n) : undefined} title={onLineClick ? 'اقفز إلى أول خطوة بعد الحالية تنفّذ هذا السطر' : undefined}>
+              <div className="ln" key={n} onClick={onLineClick ? () => onLineClick(n) : undefined} title={onLineClick ? 'Jump to this line' : undefined}>
                 <span className={'mark ' + mc}>{mark}</span>
                 <span className="num">{n}</span>
               </div>
@@ -114,7 +114,7 @@ export default function CodeArea({ code, onChange, readOnly, curLine, nextLine, 
               dir="ltr"
               onChange={(e) => onChange?.(e.target.value)}
               onKeyDown={onKeyDown}
-              aria-label="محرر كود C++"
+              aria-label="C++ editor"
             />
           )}
         </div>

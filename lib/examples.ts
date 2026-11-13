@@ -11,8 +11,8 @@ const r = String.raw;
 export const EXAMPLES: Example[] = [
   {
     id: 'linked-list-l2',
-    group: 'القوائم المترابطة',
-    title: 'قائمة مترابطة: Add و AddFirst (كودك L2)',
+    group: 'Linked lists',
+    title: 'Linked list: Add / AddFirst',
     code: r`#include <iostream>
 using namespace std;
 
@@ -70,8 +70,8 @@ int main (){
   },
   {
     id: 'pointer-basics',
-    group: 'المؤشرات',
-    title: 'أساسيات المؤشرات: & و *',
+    group: 'Pointers',
+    title: 'Pointer basics: & and *',
     code: r`#include <iostream>
 using namespace std;
 
@@ -79,18 +79,18 @@ int main() {
     int x = 10;
     int y = 20;
 
-    int* p = &x;      // p يحمل عنوان x
+    int* p = &x;      // p holds the address of x
     cout << *p << endl;
 
-    *p = 99;          // تعديل x عبر المؤشر
-    p = &y;           // الآن p يشير إلى y
+    *p = 99;          // change x through p
+    p = &y;           // p now points to y
     *p = *p + 1;
 
-    int** pp = &p;    // مؤشر إلى مؤشر
+    int** pp = &p;    // pointer to pointer
     **pp = 0;
 
     int* q = nullptr;
-    q = p;            // مؤشران لنفس المكان
+    q = p;            // two pointers, same target
 
     cout << x << " " << y << endl;
     return 0;
@@ -98,8 +98,8 @@ int main() {
   },
   {
     id: 'swap',
-    group: 'المؤشرات',
-    title: 'تبديل قيمتين: بالمؤشرات وبالمرجع (reference)',
+    group: 'Pointers',
+    title: 'Swap: pointers vs references',
     code: r`#include <iostream>
 using namespace std;
 
@@ -115,7 +115,7 @@ void swapRef(int &a, int &b){
     b = temp;
 }
 
-void noSwap(int a, int b){   // نسخ فقط! لن يتغير شيء
+void noSwap(int a, int b){   // copies only, nothing changes
     int temp = a;
     a = b;
     b = temp;
@@ -135,18 +135,18 @@ int main() {
   },
   {
     id: 'array-pointer',
-    group: 'المؤشرات',
-    title: 'مصفوفة ومؤشر يتحرك عليها',
+    group: 'Pointers',
+    title: 'Array and moving pointer',
     code: r`#include <iostream>
 using namespace std;
 
 int main() {
     int arr[5] = {10, 20, 30, 40, 50};
-    int* p = arr;          // اسم المصفوفة = عنوان أول عنصر
+    int* p = arr;          // array name = address of first element
 
     for (int i = 0; i < 5; i++) {
         cout << *p << " ";
-        p++;               // الانتقال للعنصر التالي
+        p++;               // move to next element
     }
     cout << endl;
 
@@ -161,39 +161,39 @@ int main() {
   },
   {
     id: 'new-delete',
-    group: 'الذاكرة الديناميكية',
-    title: 'new و delete والمؤشر المعلّق (dangling)',
+    group: 'Dynamic memory',
+    title: 'new, delete and dangling pointers',
     code: r`#include <iostream>
 using namespace std;
 
 int main() {
-    int* a = new int(7);       // حجز int في الـ Heap
-    int* b = a;                // b يشير لنفس المكان
+    int* a = new int(7);       // allocate an int on the heap
+    int* b = a;                // b points to the same place
 
     *b = 42;
     cout << *a << endl;
 
-    delete a;                  // تحرير الذاكرة
-    // الآن a و b كلاهما مؤشر معلّق (dangling)!
-    a = nullptr;               // الحل الصحيح
+    delete a;                  // free the memory
+    // a and b are now dangling!
+    a = nullptr;               // the fix
 
-    int* arr = new int[4];     // مصفوفة ديناميكية
+    int* arr = new int[4];     // dynamic array
     for (int i = 0; i < 4; i++)
         arr[i] = i * i;
     delete[] arr;
     arr = nullptr;
 
-    int* leak = new int(5);    // لن نحررها: تسرب ذاكرة
-    leak = new int(6);         // فقدنا العنوان القديم!
+    int* leak = new int(5);    // never freed: leak
+    leak = new int(6);         // old address lost!
 
-    cout << *b << endl;        // خطأ: استخدام ذاكرة محررة
+    cout << *b << endl;        // error: use after free
     return 0;
 }`,
   },
   {
     id: 'recursion',
-    group: 'الدوال',
-    title: 'التكرار (Recursion): المضروب factorial',
+    group: 'Functions',
+    title: 'Recursion: factorial',
     code: r`#include <iostream>
 using namespace std;
 
@@ -213,8 +213,8 @@ int main (){
   },
   {
     id: 'reverse-list',
-    group: 'القوائم المترابطة',
-    title: 'عكس قائمة مترابطة (prev / curr / next)',
+    group: 'Linked lists',
+    title: 'Reverse a linked list',
     code: r`#include <iostream>
 using namespace std;
 
@@ -254,8 +254,8 @@ int main() {
   },
   {
     id: 'delete-node',
-    group: 'القوائم المترابطة',
-    title: 'حذف عقدة من القائمة مع delete',
+    group: 'Linked lists',
+    title: 'Delete a node',
     code: r`#include <iostream>
 using namespace std;
 
@@ -280,11 +280,11 @@ void removeValue(int v) {
         prev = curr;
         curr = curr->next;
     }
-    if (curr == nullptr) return;     // غير موجود
+    if (curr == nullptr) return;     // not found
     if (prev == nullptr)
-        head = curr->next;           // حذف الأول
+        head = curr->next;           // remove head
     else
-        prev->next = curr->next;     // تخطي العقدة
+        prev->next = curr->next;     // skip the node
     delete curr;
 }
 
@@ -299,8 +299,8 @@ int main() {
   },
   {
     id: 'doubly',
-    group: 'القوائم المترابطة',
-    title: 'قائمة مترابطة مزدوجة (Doubly Linked List)',
+    group: 'Linked lists',
+    title: 'Doubly linked list',
     code: r`#include <iostream>
 using namespace std;
 
@@ -336,8 +336,8 @@ int main() {
   },
   {
     id: 'stack-ll',
-    group: 'هياكل البيانات',
-    title: 'Stack باستخدام قائمة مترابطة (push / pop)',
+    group: 'Data structures',
+    title: 'Stack (linked list)',
     code: r`#include <iostream>
 using namespace std;
 
@@ -385,8 +385,8 @@ int main() {
   },
   {
     id: 'circular-queue',
-    group: 'هياكل البيانات',
-    title: 'Queue دائري داخل class (مصفوفة)',
+    group: 'Data structures',
+    title: 'Circular queue (array)',
     code: r`#include <iostream>
 using namespace std;
 
@@ -434,8 +434,8 @@ int main() {
   },
   {
     id: 'bst',
-    group: 'هياكل البيانات',
-    title: 'شجرة بحث ثنائية (BST) — إدراج بالتكرار',
+    group: 'Data structures',
+    title: 'Binary search tree',
     code: r`#include <iostream>
 using namespace std;
 
@@ -481,8 +481,8 @@ int main() {
   },
   {
     id: 'vector',
-    group: 'أساسيات',
-    title: 'vector و string و حلقة for-each',
+    group: 'Basics',
+    title: 'vector, string, for-each',
     code: r`#include <iostream>
 #include <vector>
 #include <string>
@@ -498,7 +498,7 @@ int main() {
     for (int x : nums)
         sum += x;
 
-    for (int& x : nums)   // مرجع: يعدّل الأصل
+    for (int& x : nums)   // reference: edits the original
         x = x * 10;
 
     string name = "Ali";
@@ -509,8 +509,8 @@ int main() {
   },
   {
     id: 'cin',
-    group: 'أساسيات',
-    title: 'الإدخال cin — قائمة من المستخدم',
+    group: 'Basics',
+    title: 'cin: build a list from input',
     input: '3\n7\n2\n9\n',
     code: r`#include <iostream>
 using namespace std;

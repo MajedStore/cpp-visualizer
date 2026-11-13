@@ -128,15 +128,15 @@ export class Parser {
   }
   expect(v: string) {
     if (!this.accept(v)) {
-      const got = this.eof() ? 'نهاية الملف' : this.t.v;
+      const got = this.eof() ? 'end of file' : this.t.v;
       const prevLine = this.p > 0 ? this.toks[this.p - 1].line : this.t.line;
       const line = v === ';' ? prevLine : this.t.line;
-      this.err(`توقعت '${v}' لكن وجدت '${got}'` + (v === ';' ? ' — هل نسيت الفاصلة المنقوطة ; ؟' : ''), line);
+      this.err(`Expected '${v}' but found '${got}'` + (v === ';' ? ' — missing semicolon?' : ''), line);
     }
   }
   err(msg: string, line = this.t.line): never { throw new CppError(msg, line); }
   ident(): string {
-    if (this.t.k !== 'id') this.err(`توقعت اسماً (identifier) لكن وجدت '${this.t.v || 'نهاية الملف'}'`);
+    if (this.t.k !== 'id') this.err(`Expected an identifier but found '${this.t.v || 'end of file'}'`);
     return this.toks[this.p++].v;
   }
   srcFrom(startTok: number): string {
@@ -207,9 +207,9 @@ export class Parser {
       } else if (this.structNames.has(name) || name === 'string') {
         ts = { base: name, ptr: 0, ref: false };
       } else if (['stack', 'queue', 'map', 'set', 'list', 'deque', 'pair', 'unordered_map', 'array'].includes(name)) {
-        this.err(`النوع std::${name} غير مدعوم حالياً في المُصوِّر (المدعوم: vector و string والـ struct/class الخاصة بك)`, line);
+        this.err(`std::${name} is not supported (supported: vector, string and your own struct/class)`, line);
       } else {
-        this.err(`نوع غير معروف '${name}'`, line);
+        this.err(`Unknown type '${name}'`, line);
       }
     }
     while (this.accept('const')) isConst = true;
@@ -240,7 +240,7 @@ export class Parser {
     if (this.accept('&') || this.accept('&&')) ref = true;
     let name = '';
     if (this.t.k === 'id' && !(allowNoName && (this.isv(',') || this.isv(')')))) name = this.ident();
-    else if (!allowNoName) this.err(`توقعت اسم متغير لكن وجدت '${this.t.v}'`);
+    else if (!allowNoName) this.err(`Expected a variable name but found '${this.t.v}'`);
     const dims: (Expr | null)[] = [];
     while (this.accept('[')) {
       if (this.accept(']')) dims.push(null);
@@ -290,8 +290,8 @@ export class Parser {
     while (!this.eof()) {
       if (this.accept(';')) continue;
       if (this.isv('using')) { while (!this.isv(';') && !this.eof()) this.p++; this.expect(';'); continue; }
-      if (this.isv('template')) this.err('القوالب (template) غير مدعومة حالياً');
-      if (this.isv('namespace')) this.err('تعريف namespace غير مدعوم حالياً');
+      if (this.isv('template')) this.err('Templates are not supported');
+      if (this.isv('namespace')) this.err('Namespace definitions are not supported');
       if (this.isv('typedef')) { this.parseTypedef(); continue; }
       if (this.isv('enum')) { this.parseEnum(); continue; }
       if ((this.isv('struct') || this.isv('class')) && this.at(1).k === 'id' && (this.isv('{', 2) || this.isv(';', 2) || this.isv(':', 2))) {
@@ -305,7 +305,7 @@ export class Parser {
         this.expect('::');
         const isDtor = this.accept('~');
         const name = this.ident();
-        if (name !== cls) this.err(`تعريف غير متوقع ${cls}::${name}`);
+        if (name !== cls) this.err(`Unexpected definition ${cls}::${name}`);
         const fn = this.parseFunctionRest({ base: 'void', ptr: 0, ref: false }, name, cls, line, !isDtor, isDtor);
         this.attachMethod(cls, fn, line);
         continue;
@@ -317,7 +317,7 @@ export class Parser {
 
   attachMethod(cls: string, fn: FuncDef, line: number) {
     const sd = this.prog.structs.get(cls);
-    if (!sd) this.err(`الكلاس ${cls} غير معرف`, line);
+    if (!sd) this.err(`Class ${cls} is not declared`, line);
     if (fn.isCtor) {
       const idx = sd.ctors.findIndex((c) => !c.body && c.params.length === fn.params.length);
       if (idx >= 0) { mergeDefaults(fn, sd.ctors[idx]); sd.ctors[idx] = fn; } else sd.ctors.push(fn);
@@ -333,7 +333,7 @@ export class Parser {
   parseTypedef() {
     this.expect('typedef');
     if ((this.isv('struct') || this.isv('class')) && (this.isv('{', 1) || this.isv('{', 2))) {
-      this.err('صيغة typedef struct {...} غير مدعومة — استخدم struct Name {...};');
+      this.err('typedef struct {...} is not supported — use struct Name {...};');
     }
     const ts = this.parseType();
     const name = this.ident();
@@ -367,17 +367,17 @@ export class Parser {
     const name = this.ident();
     this.structNames.add(name);
     if (this.accept(';')) return; // forward declaration
-    if (this.isv(':')) this.err('الوراثة (inheritance) غير مدعومة حالياً في المُصوِّر');
+    if (this.isv(':')) this.err('Inheritance is not supported');
     this.expect('{');
     const sd: StructDef = this.prog.structs.get(name) || { name, fields: [], ctors: [], methods: new Map(), line, isClass };
     sd.line = line;
     this.prog.structs.set(name, sd);
     while (!this.isv('}')) {
-      if (this.eof()) this.err(`لم يتم إغلاق ${isClass ? 'class' : 'struct'} ${name} بـ }`, line);
+      if (this.eof()) this.err(`${isClass ? 'class' : 'struct'} ${name} is missing a closing }`, line);
       if (this.accept(';')) continue;
       if ((this.isv('public') || this.isv('private') || this.isv('protected')) && this.isv(':', 1)) { this.p += 2; continue; }
       if (this.isv('friend')) { while (!this.isv(';')) this.p++; this.p++; continue; }
-      if (this.isv('struct') || this.isv('class')) this.err('تعريف struct داخل struct غير مدعوم');
+      if (this.isv('struct') || this.isv('class')) this.err('Nested struct definitions are not supported');
       const mline = this.t.line;
       // constructor
       let k = 0;
@@ -398,7 +398,7 @@ export class Parser {
       }
       const isStatic = this.isv('static') || (this.isv('static', 1));
       const base = this.parseBaseType();
-      if (this.isv('operator') || this.isv('operator', 1)) this.err('التحميل الزائد للمعاملات (operator overloading) غير مدعوم حالياً');
+      if (this.isv('operator') || this.isv('operator', 1)) this.err('Operator overloading is not supported');
       let first = true;
       do {
         const d = this.parseDeclarator();
@@ -429,7 +429,7 @@ export class Parser {
   parseTopDeclOrFunc() {
     const line = this.t.line;
     if (!this.isTypeStart()) {
-      this.err(`لم أفهم هذا السطر: '${this.t.v}' — توقعت تعريف دالة أو متغير أو struct`);
+      this.err(`Unexpected '${this.t.v}' — expected a function, variable or struct declaration`);
     }
     const base = this.parseBaseType();
     const decls: Declarator[] = [];
@@ -445,7 +445,7 @@ export class Parser {
           // static member definition:  int Cls::count = 0;
           const sd = this.prog.structs.get(cls);
           const f = sd?.fields.find((x) => x.isStatic && x.d.name === mname);
-          if (!f) this.err(`'${cls}::${mname}' ليس عضواً static في ${cls}`);
+          if (!f) this.err(`'${cls}::${mname}' is not a static member of ${cls}`);
           const tmp: Declarator = { name: mname, ptr: 0, ref: false, dims: [], line };
           while (this.accept('[')) { if (!this.accept(']')) { tmp.dims.push(this.parseExpr()); this.expect(']'); } }
           this.parseInit(tmp);
@@ -520,7 +520,7 @@ export class Parser {
     this.expect('{');
     const body: Stmt[] = [];
     while (!this.isv('}')) {
-      if (this.eof()) this.err('لم يتم إغلاق القوس { — ينقص }', line);
+      if (this.eof()) this.err('Missing closing }', line);
       body.push(this.parseStatement());
     }
     const endLine = this.t.line;
@@ -616,7 +616,7 @@ export class Parser {
           const items: Stmt[] = [];
           const labels: { value?: Expr; def?: boolean; idx: number; line: number }[] = [];
           while (!this.isv('}')) {
-            if (this.eof()) this.err('لم يتم إغلاق switch', line);
+            if (this.eof()) this.err('switch is missing a closing }', line);
             if (this.isv('case')) {
               const l = this.t.line;
               this.p++;
@@ -652,10 +652,10 @@ export class Parser {
           this.expect(';');
           return { t: 'return', e, es, line };
         }
-        case 'goto': this.err('goto غير مدعوم');
-        case 'try': case 'throw': this.err('الاستثناءات (try/throw) غير مدعومة حالياً');
+        case 'goto': this.err('goto is not supported');
+        case 'try': case 'throw': this.err('Exceptions (try/throw) are not supported');
         case 'struct': case 'class':
-          if (!this.isTypeStart()) this.err('تعريف struct/class داخل دالة غير مدعوم — عرّفه خارج الدوال');
+          if (!this.isTypeStart()) this.err('Local struct/class definitions are not supported');
       }
       if (this.isTypeStart()) return this.parseDeclStmt();
     }
@@ -791,7 +791,7 @@ export class Parser {
       if (t.v === '(') { this.p++; const args = this.parseArgs(); e = { t: 'call', f: e, args, line: t.line, s: this.srcFrom(st) }; continue; }
       if (t.v === '.' || t.v === '->') {
         this.p++;
-        if (this.isv('~')) this.err('استدعاء الـ destructor يدوياً غير مدعوم');
+        if (this.isv('~')) this.err('Explicit destructor calls are not supported');
         const name = this.ident();
         e = { t: 'member', e, name, arrow: t.v === '->', line: t.line, s: this.srcFrom(st) };
         continue;
@@ -824,8 +824,8 @@ export class Parser {
         return { t: 'initlist', items: this.parseBraceList(), line, s: this.srcFrom(st) };
       }
       if (t.v === '::') { this.p++; return this.parsePrimary(); }
-      if (t.v === '[') this.err('دوال lambda غير مدعومة');
-      this.err(`لم أتوقع '${t.v}' هنا`);
+      if (t.v === '[') this.err('Lambdas are not supported');
+      this.err(`Unexpected '${t.v}'`);
     }
     if (t.k === 'id') {
       const v = t.v;
@@ -854,8 +854,8 @@ export class Parser {
           return { t: 'construct', ts, args, brace, line, s: this.srcFrom(st) };
         }
       }
-      if (QUALS.has(v) || PRIM_WORDS.has(v)) this.err(`لم أتوقع '${v}' هنا`);
-      if (['if', 'else', 'while', 'for', 'do', 'return', 'switch', 'case', 'break', 'continue'].includes(v)) this.err(`لم أتوقع الكلمة '${v}' هنا`);
+      if (QUALS.has(v) || PRIM_WORDS.has(v)) this.err(`Unexpected '${v}'`);
+      if (['if', 'else', 'while', 'for', 'do', 'return', 'switch', 'case', 'break', 'continue'].includes(v)) this.err(`Unexpected keyword '${v}'`);
       this.p++;
       if (this.isv('::')) {
         this.p++;
@@ -864,8 +864,8 @@ export class Parser {
       }
       return { t: 'id', name: v, line, s: v };
     }
-    if (t.k === 'eof') this.err('نهاية الملف بشكل غير متوقع');
-    this.err(`رمز غير متوقع '${t.v}'`);
+    if (t.k === 'eof') this.err('Unexpected end of file');
+    this.err(`Unexpected token '${t.v}'`);
   }
 }
 

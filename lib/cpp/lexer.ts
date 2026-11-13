@@ -45,7 +45,7 @@ export function lex(src: string): Token[] {
     // i points after opening quote
     let s = '';
     while (i < n && src[i] !== quote) {
-      if (src[i] === '\n') throw new CppError('نص (string) لم يُغلق بعلامة التنصيص', line);
+      if (src[i] === '\n') throw new CppError('Unterminated string literal', line);
       if (src[i] === '\\') {
         const e = src[i + 1];
         if (e === 'x') {
@@ -62,7 +62,7 @@ export function lex(src: string): Token[] {
       }
       s += src[i++];
     }
-    if (i >= n) throw new CppError('نص (string) لم يُغلق بعلامة التنصيص', line);
+    if (i >= n) throw new CppError('Unterminated string literal', line);
     i++; // closing quote
     return s;
   };
@@ -87,7 +87,7 @@ export function lex(src: string): Token[] {
       }
       const text = src.slice(start, i).replace(/\\\n/g, ' ').trim();
       if (/^#\s*define\s+[A-Za-z_]\w*\(/.test(text)) {
-        throw new CppError('الماكرو الدالّي (#define بمعاملات) غير مدعوم — استخدم دالة عادية', startLine);
+        throw new CppError('Function-like macros (#define with parameters) are not supported', startLine);
       }
       const m = /^#\s*define\s+([A-Za-z_]\w*)(?:\s+(.*))?$/.exec(text);
       if (m) {
@@ -139,7 +139,7 @@ export function lex(src: string): Token[] {
       const start = i;
       i++;
       const s = readEscaped("'");
-      if (s.length === 0) throw new CppError("حرف فارغ '' غير صالح", line);
+      if (s.length === 0) throw new CppError("Empty character literal ''", line);
       push({ k: 'char', v: s, line, pos: start, end: i, num: s.charCodeAt(0) });
       continue;
     }
@@ -147,7 +147,7 @@ export function lex(src: string): Token[] {
     for (const o of OPS3) if (src.startsWith(o, i)) { op = o; break; }
     if (!op) for (const o of OPS2) if (src.startsWith(o, i)) { op = o; break; }
     if (!op && OPS1.includes(c)) op = c;
-    if (!op) throw new CppError(`رمز غير متوقع '${c}'`, line);
+    if (!op) throw new CppError(`Unexpected character '${c}'`, line);
     push({ k: 'op', v: op, line, pos: i, end: i + op.length });
     i += op.length;
   }

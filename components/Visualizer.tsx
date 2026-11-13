@@ -1,10 +1,11 @@
 'use client';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodeArea from './CodeArea';
 import SimpleView from './SimpleView';
 import { runProgram } from '@/lib/cpp/interpreter';
 import type { RunResult, Snapshot } from '@/lib/cpp/types';
 import { EXAMPLES } from '@/lib/examples';
+import { highlight } from '@/lib/highlight';
 
 const LS = { code: 'cppviz.code', input: 'cppviz.input', theme: 'cppviz.theme', interval: 'cppviz.interval', auto: 'cppviz.autostart' };
 
@@ -14,7 +15,6 @@ function lsGet(k: string): string | null {
 function lsSet(k: string, v: string) {
   try { localStorage.setItem(k, v); } catch { /* ignore */ }
 }
-
 function encodeShare(code: string, input: string): string {
   const bytes = new TextEncoder().encode(JSON.stringify({ c: code, i: input }));
   let bin = '';
@@ -28,22 +28,20 @@ function decodeShare(s: string): { c: string; i: string } | null {
   } catch { return null; }
 }
 
-// keep code fragments left-to-right inside Arabic error messages
-const LTR_RUN = /[A-Za-z0-9_'"(\[*&!~<>=+\-.:#@{]+(?:[\x20-\x7E]*[A-Za-z0-9_)\]'";*}&>+\-])?/g;
-function Bidi({ text }: { text: string }) {
-  const clean = text.replace(/[⁦-⁩]/g, '');
-  const out: React.ReactNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  LTR_RUN.lastIndex = 0;
-  while ((m = LTR_RUN.exec(clean))) {
-    if (m.index > last) out.push(clean.slice(last, m.index));
-    out.push(<bdi dir="ltr" key={m.index}>{m[0]}</bdi>);
-    last = m.index + m[0].length;
-  }
-  if (last < clean.length) out.push(clean.slice(last));
-  return <>{out}</>;
-}
+const Icon = {
+  play: <svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 4.5v15l13-7.5z" fill="currentColor" /></svg>,
+  pause: <svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 4h4v16H6zM14 4h4v16h-4z" fill="currentColor" /></svg>,
+  prev: <svg viewBox="0 0 24 24" width="16" height="16"><path d="M15 5l-7 7 7 7" stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+  next: <svg viewBox="0 0 24 24" width="16" height="16"><path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+  first: <svg viewBox="0 0 24 24" width="16" height="16"><path d="M17 5l-7 7 7 7M7 5v14" stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+  last: <svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 5l7 7-7 7M17 5v14" stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+  edit: <svg viewBox="0 0 24 24" width="15" height="15"><path d="M4 20h4L19 9l-4-4L4 16v4z" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round" /></svg>,
+  reload: <svg viewBox="0 0 24 24" width="15" height="15"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+  link: <svg viewBox="0 0 24 24" width="15" height="15"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" /></svg>,
+  sun: <svg viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="4" fill="currentColor" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>,
+  moon: <svg viewBox="0 0 24 24" width="15" height="15"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" fill="currentColor" /></svg>,
+  clock: <svg viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" fill="none" /><path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" /></svg>,
+};
 
 function Console({ out }: { out: string }) {
   const parts = out.split(/(\u0001[^\u0002]*\u0002)/);
@@ -64,7 +62,7 @@ export default function Visualizer() {
   const [interval, setIntervalSec] = useState(1);
   const [autoStart, setAutoStart] = useState(false);
   const [exampleId, setExampleId] = useState('');
-  const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>('auto');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [toast, setToast] = useState('');
   const loaded = useRef(false);
 
@@ -74,12 +72,13 @@ export default function Visualizer() {
     if (shared) { setCode(shared.c); setInput(shared.i || ''); }
     else {
       const c = lsGet(LS.code);
-      if (c) setCode(c); else setExampleId(EXAMPLES[0].id);
+      if (c && !/[؀-ۿ]/.test(c)) setCode(c); else setExampleId(EXAMPLES[0].id);
       const i = lsGet(LS.input);
       if (i) setInput(i);
     }
     const th = lsGet(LS.theme);
     if (th === 'light' || th === 'dark') setTheme(th);
+    else if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) setTheme('dark');
     const iv = parseFloat(lsGet(LS.interval) || '');
     if (iv > 0) setIntervalSec(iv);
     setAutoStart(lsGet(LS.auto) === '1');
@@ -106,8 +105,7 @@ export default function Visualizer() {
   useEffect(() => { if (loaded.current) lsSet(LS.interval, String(interval)); }, [interval]);
   useEffect(() => { if (loaded.current) lsSet(LS.auto, autoStart ? '1' : '0'); }, [autoStart]);
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
     if (loaded.current) lsSet(LS.theme, theme);
   }, [theme]);
 
@@ -168,7 +166,7 @@ export default function Visualizer() {
 
   const share = async () => {
     const url = `${window.location.origin}${window.location.pathname}#code=${encodeShare(code, input)}`;
-    try { await navigator.clipboard.writeText(url); setToast('✔'); setTimeout(() => setToast(''), 1500); } catch { window.prompt('', url); }
+    try { await navigator.clipboard.writeText(url); setToast('Link copied'); setTimeout(() => setToast(''), 1600); } catch { window.prompt('', url); }
   };
 
   const onLineClick = (line: number) => {
@@ -177,45 +175,51 @@ export default function Visualizer() {
     if (j >= 0) { setPlaying(false); setIdx(j); }
   };
 
+  const codeLines = useMemo(() => code.split('\n'), [code]);
+  const stepLine = snap ? (codeLines[snap.line - 1] ?? '').trim() : '';
+  const stepSegs = useMemo(() => highlight(stepLine)[0] ?? [], [stepLine]);
+
   const parseError = result?.parseError;
   const runError = snap && (snap.error || (snap.kind === 'input' ? snap.note : ''));
   const errLine = parseError ? parseError.line : runError ? snap!.line : undefined;
-  const errMsg = parseError ? parseError.msg : runError;
+  const errMsg = parseError ? `Line ${parseError.line}: ${parseError.msg}` : runError;
 
   return (
-    <>
-      <header className="bar">
-        <span className="logo">C++</span>
-        <select className="sel" value={exampleId} onChange={(e) => loadExample(e.target.value)} aria-label="examples">
-          <option value="">أمثلة</option>
+    <div className="app">
+      <header className="top">
+        <div className="brand"><span className="mark">C++</span><span className="name">Visualizer</span></div>
+        <select className="select" value={exampleId} onChange={(e) => loadExample(e.target.value)} aria-label="Examples">
+          <option value="">Examples</option>
           {EXAMPLES.map((e) => <option value={e.id} key={e.id}>{e.title}</option>)}
         </select>
-        <span className="grow" />
-        <label className="timer" title="الوقت بين كل خطوة (ثانية)">
+        <div className="spacer" />
+        <label className="field" title="Seconds per step">
+          {Icon.clock}
           <input type="number" min={0.1} max={10} step={0.1} value={interval} onChange={(e) => { const v = parseFloat(e.target.value); if (v > 0) setIntervalSec(v); }} />
-          <span>ث</span>
+          <span className="unit">s</span>
         </label>
-        <label className="chk" title="يبدأ التشغيل التلقائي فور الضغط على تشغيل">
+        <label className="switch" title="Start playing when you press Run">
           <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />
-          <span>بدء تلقائي</span>
+          <span className="track"><span className="thumb" /></span>
+          <span>Autoplay</span>
         </label>
+        <div className="sep" />
+        <button className="btn ghost sq" onClick={share} title="Copy share link">{Icon.link}</button>
+        <button className="btn ghost sq" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Theme">{theme === 'dark' ? Icon.sun : Icon.moon}</button>
         {mode === 'edit' ? (
-          <button className="btn primary" onClick={run} title="Ctrl+Enter">▶ تشغيل</button>
+          <button className="btn primary" onClick={run} title="Ctrl+Enter">{Icon.play}<span>Run</span></button>
         ) : (
           <>
-            <button className="btn" onClick={() => { setPlaying(false); setMode('edit'); }} title="Esc">✎ تعديل</button>
-            <button className="btn primary" onClick={run}>⟳</button>
+            <button className="btn" onClick={() => { setPlaying(false); setMode('edit'); }} title="Esc">{Icon.edit}<span>Edit</span></button>
+            <button className="btn primary" onClick={run}>{Icon.reload}<span>Rerun</span></button>
           </>
         )}
-        <button className="btn icon" onClick={share} title="share">🔗</button>
-        <button className="btn icon" onClick={() => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'auto' : 'dark')} title="theme">
-          {theme === 'dark' ? '☾' : theme === 'light' ? '☀' : '◐'}
-        </button>
       </header>
 
-      <main className="layout">
-        <div className="col">
-          <section className="box code-box">
+      <main className="main">
+        <div className="left">
+          <section className="card editor">
+            <div className="card-h"><span className="file">main.cpp</span></div>
             <CodeArea
               code={code}
               onChange={(s) => { setCode(s); if (result?.parseError) setResult(null); }}
@@ -226,38 +230,45 @@ export default function Visualizer() {
               onLineClick={mode === 'view' ? onLineClick : undefined}
             />
           </section>
-
-          {errMsg && <div className="errbar">{errMsg.split('\n').map((l, i) => <div key={i}><Bidi text={l} /></div>)}</div>}
-
-          {mode === 'view' && snap ? (
-            <section className="box ctrl">
-              <div className="row" dir="ltr">
-                <button className="btn icon" onClick={() => { setPlaying(false); go(0); }} disabled={idx === 0}>⏮</button>
-                <button className="btn icon" onClick={() => { setPlaying(false); go(idx - 1); }} disabled={idx === 0}>◀</button>
-                <span className="count">{idx + 1}/{snaps.length}</span>
-                <button className="btn icon" onClick={() => { setPlaying(false); go(idx + 1); }} disabled={idx >= last}>▶</button>
-                <button className="btn icon" onClick={() => { setPlaying(false); go(last); }} disabled={idx >= last}>⏭</button>
-                <span className="grow" />
-                <button className={'btn play' + (playing ? ' on' : '')} onClick={() => { if (idx >= last) setIdx(0); setPlaying((p) => !p); }}>{playing ? '⏸' : '⏵'}</button>
-              </div>
-              <input className="slider" type="range" min={0} max={last} value={idx} onChange={(e) => { setPlaying(false); setIdx(+e.target.value); }} />
-            </section>
-          ) : (
-            <section className="box">
-              <textarea className="stdin" value={input} onChange={(e) => setInput(e.target.value)} placeholder="cin" spellCheck={false} dir="ltr" />
+          {mode === 'edit' && (
+            <section className="card io">
+              <div className="card-h"><span className="file">stdin</span></div>
+              <textarea className="stdin" value={input} onChange={(e) => setInput(e.target.value)} spellCheck={false} />
             </section>
           )}
-
-          <section className="box">
+          <section className="card io">
+            <div className="card-h"><span className="file">output</span></div>
             <Console out={mode === 'view' && snap ? snap.out : ''} />
           </section>
         </div>
 
-        <section className="box canvas">
-          {mode === 'view' && snap ? <SimpleView snap={snap} prev={prev} idx={idx} /> : null}
+        <section className="card stage">
+          {mode === 'view' && snap && (
+            <div className="stepbar">
+              <span className="lnum">{snap.line}</span>
+              <code className="lcode">{stepSegs.length ? stepSegs.map((s, i) => <span key={i} className={s.c}>{s.t}</span>) : '…'}</code>
+            </div>
+          )}
+          {errMsg && <div className="error">{errMsg}</div>}
+          <div className="canvas">
+            {mode === 'view' && snap ? <SimpleView snap={snap} prev={prev} idx={idx} /> : null}
+          </div>
+          {mode === 'view' && snap && (
+            <div className="player">
+              <div className="buttons">
+                <button className="btn ghost sq" onClick={() => { setPlaying(false); go(0); }} disabled={idx === 0} title="First">{Icon.first}</button>
+                <button className="btn ghost sq" onClick={() => { setPlaying(false); go(idx - 1); }} disabled={idx === 0} title="Back">{Icon.prev}</button>
+                <button className="btn primary round" onClick={() => { if (idx >= last) setIdx(0); setPlaying((p) => !p); }} title="Play / Pause">{playing ? Icon.pause : Icon.play}</button>
+                <button className="btn ghost sq" onClick={() => { setPlaying(false); go(idx + 1); }} disabled={idx >= last} title="Next">{Icon.next}</button>
+                <button className="btn ghost sq" onClick={() => { setPlaying(false); go(last); }} disabled={idx >= last} title="Last">{Icon.last}</button>
+              </div>
+              <input className="slider" type="range" min={0} max={last} value={idx} onChange={(e) => { setPlaying(false); setIdx(+e.target.value); }} style={{ ['--p' as any]: `${last ? (idx / last) * 100 : 0}%` }} />
+              <span className="counter">{idx + 1} / {snaps.length}</span>
+            </div>
+          )}
         </section>
       </main>
       {toast && <div className="toast">{toast}</div>}
-    </>
+    </div>
   );
 }

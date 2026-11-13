@@ -111,13 +111,18 @@ export default function SimpleView({ snap, prev, idx }: Props) {
       else if (sv.val.k === 'array') sv.val.elems.forEach((e) => nameWalk(e, `${path}[${e.name}]`));
     };
     snap.frames.forEach((f) => f.vars.forEach((v) => { if (v.id >= 0) nameWalk(v, v.name); }));
+    // every pointer held outside the heap (variables, fields of stack objects, array slots)
     const ptrs: PtrVar[] = [];
     const vars: SnapVar[] = [];
+    const ptrWalk = (sv: SnapVar, path: string, fn: string) => {
+      if (sv.val.k === 'ptr') ptrs.push({ id: sv.id, name: path, fn, v: sv.val });
+      else if (sv.val.k === 'struct') sv.val.fields.forEach((f) => ptrWalk(f, `${path}.${f.name}`, fn));
+      else if (sv.val.k === 'array') sv.val.elems.forEach((e) => ptrWalk(e, `${path}[${e.name}]`, fn));
+    };
     for (const f of snap.frames) {
       for (const v of f.vars) {
         if (v.name === 'this' && v.id < 0) continue;
-        if (v.val.k === 'ptr') ptrs.push({ id: v.id, name: v.name, fn: f.global ? '' : f.name, v: v.val });
-        else vars.push(v);
+        ptrWalk(v, v.name, f.global ? '' : f.name);
       }
     }
     const count = new Map<string, number>();
@@ -193,30 +198,7 @@ export default function SimpleView({ snap, prev, idx }: Props) {
 
   return (
     <div className="sv" ref={wrapRef}>
-      {(model.vars.length > 0 || model.loose.length > 0) && (
-        <div className="vars">
-          {model.vars.map((v) =>
-            v.val.k === 'struct' ? (
-              <div className="vobj" key={v.id}><span className="vn">{v.name}</span><Obj id={v.id} type={v.type} val={v.val} ctx={ctx} /></div>
-            ) : v.val.k === 'array' ? (
-              <div className="vobj" key={v.id}><span className="vn">{v.name}</span><Arr sv={v} ctx={ctx} /></div>
-            ) : (
-              <span key={changed(v, ctx) ? `${v.id}-${idx}` : v.id} className={'chip' + (changed(v, ctx) ? ' chg' : '')} data-cell={v.id}>
-                {v.name} <b>{v.val.k === 'ref' ? '&' : txt(v.val)}</b>
-              </span>
-            ),
-          )}
-          {model.loose.map((p) => (
-            <div className="loose" key={p.id} data-cell={p.id}>
-              <PtrBox p={p} label={model.label(p)} anchor={false} />
-              <span className="to">→</span>
-              {p.v.null ? <div className="nullb sm">NULL</div>
-                : p.v.target != null && model.names.has(p.v.target) ? <span className="tname">{model.names.get(p.v.target)}</span>
-                : <span className="tname q">?</span>}
-            </div>
-          ))}
-        </div>
-      )}
+      {groups.length === 0 && <div className="empty">No nodes yet</div>}
 
       {groups.map((g, gi) => (
         <div className={'grid ' + g.kind + (g.tree ? ' tree' : '')} key={gi}>

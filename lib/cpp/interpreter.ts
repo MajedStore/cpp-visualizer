@@ -213,12 +213,12 @@ export class Interp {
   // =================== snapshots ===================
   snap(kind: SnapKind, line: number, note: string, force = false) {
     if (!force && this.snaps.length >= this.maxSteps) {
-      throw new StopSig(`⏱ تم الوصول إلى الحد الأقصى للخطوات (${this.maxSteps} خطوة). غالباً يوجد حلقة لا نهائية (infinite loop)، أو أن البرنامج طويل جداً للتصوير.`, 'error');
+      throw new StopSig(`Step limit reached (${this.maxSteps} steps) — possible infinite loop`, 'error');
     }
     const evs = this.events;
     this.events = [];
     if (this.printed) {
-      evs.push(`🖨 طباعة على الشاشة: «${this.printed.replace(/\u0001|\u0002/g, '').replace(/\n/g, '⏎')}»`);
+      evs.push(`output: «${this.printed.replace(/\u0001|\u0002/g, '').replace(/\n/g, '⏎')}»`);
       this.printed = '';
     }
     this.snaps.push(this.serialize(kind, line, note, evs));
@@ -264,7 +264,7 @@ export class Interp {
     for (const h of this.heapList) if (h.alive && !reach.has(h)) visit(h, false);
 
     const frames: SnapFrame[] = [];
-    frames.push({ id: 0, name: 'Global — المتغيرات العامة', line: 0, global: true, vars: this.globalOrder.map((c) => this.sVar(c.name!, c)) });
+    frames.push({ id: 0, name: 'Global', line: 0, global: true, vars: this.globalOrder.map((c) => this.sVar(c.name!, c)) });
     for (const f of this.frames) {
       const vars: SnapVar[] = [];
       if (f.thisCell) {
@@ -349,14 +349,14 @@ export class Interp {
     const v = this.sVal(c);
     if (v.k === 'ptr') {
       if (v.null) return 'nullptr';
-      if (v.uninit) return '? (غير مُهيأ)';
+      if (v.uninit) return '? (uninitialized)';
       const p = c.v;
       if (p && p.target) return `→ ${this.label(p.target)}`;
       return v.text;
     }
-    if (v.k === 'prim') return v.uninit ? '? (غير مُهيأ)' : v.text;
+    if (v.k === 'prim') return v.uninit ? '? (uninitialized)' : v.text;
     if (v.k === 'struct') return `{${v.fields.map((f) => f.name).join(', ')}}`;
-    if (v.k === 'array') return `[${c.v.length} عناصر]`;
+    if (v.k === 'array') return `[${c.v.length} items]`;
     return '…';
   }
 
@@ -368,11 +368,11 @@ export class Interp {
     if (t.k === 'nullptr') return 'nullptr';
     if (t.k === 'ptr') {
       if (rv.v === null) return 'nullptr';
-      if (rv.v.garbage) return '? (عنوان عشوائي)';
-      if (rv.v.target) return `مؤشر → ${this.label(rv.v.target)}`;
+      if (rv.v.garbage) return '? (garbage)';
+      if (rv.v.target) return `→ ${this.label(rv.v.target)}`;
       return hex(this.addrOf(rv.v));
     }
-    if (t.k === 'struct') return `كائن ${t.name}`;
+    if (t.k === 'struct') return `${t.name} object`;
     return typeName(t);
   }
 
@@ -386,18 +386,18 @@ export class Interp {
       let name = typeName(root.t);
       if (root.t.k === 'struct') {
         const first = Object.values(root.v as Record<string, Cell>).find((f) => f.t.k === 'prim' || f.t.k === 'string');
-        name += first && first.init ? `(${first.t.k === 'string' ? JSON.stringify(first.v) : this.fmtPrim(first.v, first.t.name)})` : ' الجديدة';
-      } else if (root.t.k === 'array') name = `مصفوفة ${typeName(root.t.of)}[${root.t.n}]`;
+        name += first && first.init ? `(${first.t.k === 'string' ? JSON.stringify(first.v) : this.fmtPrim(first.v, first.t.name)})` : '';
+      } else if (root.t.k === 'array') name = `${typeName(root.t.of)}[${root.t.n}]`;
       return name + path;
     }
-    if (c.proxy) return 'حرف داخل string';
-    return `${root.name ?? 'كائن مؤقت'}${path}`;
+    if (c.proxy) return 'string char';
+    return `${root.name ?? 'temporary'}${path}`;
   }
 
   // =================== types & memory ===================
   sd(name: string): StructDef {
     const s = this.prog.structs.get(name);
-    if (!s) this.err(`الـ struct/class '${name}' غير معرّف بالكامل`);
+    if (!s) this.err(`struct/class '${name}' is incomplete`);
     return s;
   }
 
@@ -409,7 +409,7 @@ export class Interp {
     else if (b === 'auto') t = { k: 'auto' };
     else if (this.prog.structs.has(b)) t = { k: 'struct', name: b };
     else if (PRIM_SIZE[b] !== undefined) t = { k: 'prim', name: b };
-    else this.err(`النوع '${b}' غير معرّف بالكامل (هل عرّفت الـ struct؟)`);
+    else this.err(`Type '${b}' is incomplete`);
     for (let i = 0; i < ts.ptr + extraPtr; i++) t = { k: 'ptr', to: t };
     for (let i = dims.length - 1; i >= 0; i--) t = { k: 'array', of: t, n: dims[i] };
     if (ts.ref || ref) t = { k: 'ref', to: t };
@@ -420,14 +420,14 @@ export class Interp {
     const got = this.layouts.get(name);
     if (got) return got;
     const sd = this.sd(name);
-    if (this.layoutBusy.has(name)) this.err(`الـ struct ${name} يحتوي على نفسه مباشرة — استخدم مؤشراً (${name}*) بدلاً من ذلك`, sd.line);
+    if (this.layoutBusy.has(name)) this.err(`struct ${name} contains itself — use a pointer (${name}*)`, sd.line);
     this.layoutBusy.add(name);
     const fields: { name: string; t: Type; off: number }[] = [];
     let off = 0;
     let maxAl = 1;
     for (const f of sd.fields) {
       if (f.isStatic) continue;
-      const dims = f.d.dims.map((x) => (x == null ? 0 : this.toInt(this.ev(x), 'حجم المصفوفة')));
+      const dims = f.d.dims.map((x) => (x == null ? 0 : this.toInt(this.ev(x), 'array size')));
       const t = this.tsType(f.ts, f.d.ptr, dims, f.d.ref);
       const al = this.alignOf(t);
       const sz = this.sizeOf(t);
@@ -472,7 +472,7 @@ export class Interp {
       case 'string': c.v = ''; c.init = true; break;
       case 'vector': c.v = []; c.init = true; c.cap = 0; break;
       case 'array': {
-        if (t.n > 20000) this.err(`المصفوفة كبيرة جداً (${t.n} عنصر) للتصوير`);
+        if (t.n > 20000) this.err(`Array too large to visualize (${t.n} elements)`);
         const es = this.sizeOf(t.of);
         c.v = [];
         for (let i = 0; i < t.n; i++) c.v.push(this.newCell(t.of, addr + i * es, zero, c, i));
@@ -545,7 +545,7 @@ export class Interp {
   tempFrom(rv: RV): Cell {
     let t = rv.t;
     if (t.k === 'nullptr') t = { k: 'ptr', to: VOID };
-    if (t.k === 'initlist' || t.k === 'manip') this.err('قيمة غير صالحة هنا');
+    if (t.k === 'initlist' || t.k === 'manip') this.err('Invalid value here');
     const c = this.tempCell(t);
     this.store(c, rv);
     return c;
@@ -573,15 +573,15 @@ export class Interp {
   checkAlive(c: Cell) {
     const r = c.root;
     if (!r.alive) {
-      if (r.heap) this.err('Use-after-free 💥: محاولة الوصول إلى ذاكرة تم تحريرها بـ delete (مؤشر معلّق dangling pointer)');
-      this.err('محاولة الوصول إلى متغير محلي انتهى عمره (خرج من نطاقه) عبر مؤشر أو مرجع');
+      if (r.heap) this.err('Use-after-free: accessing memory that was deleted (dangling pointer)');
+      this.err('Accessing a local variable that is out of scope');
     }
   }
 
   // =================== values ===================
   read(c: Cell): RV {
     if (c.t.k === 'ref') {
-      if (!c.v) this.err('مرجع غير مُهيأ');
+      if (!c.v) this.err('Uninitialized reference');
       return this.read(c.v);
     }
     if (c.proxy) return { t: c.t, v: c.proxy.get() };
@@ -603,8 +603,8 @@ export class Interp {
   warnUninit(c: Cell) {
     if (this.warned.has(c.id)) return;
     this.warned.add(c.id);
-    const what = c.t.k === 'ptr' ? 'المؤشر' : 'المتغير';
-    this.event(`⚠ قراءة ${what} ${this.label(c)} قبل إعطائه قيمة (غير مُهيأ) — في C++ الحقيقي قيمته عشوائية (garbage)` + (c.t.k === 'ptr' ? ' أي يشير لمكان مجهول!' : ''));
+    const what = c.t.k === 'ptr' ? 'pointer' : 'variable';
+    this.event(`reading uninitialized ${what} ${this.label(c)}`);
   }
 
   copyCell(dst: Cell, src: Cell) {
@@ -636,7 +636,7 @@ export class Interp {
   }
 
   store(c: Cell, rv: RV) {
-    if (c.t.k === 'ref') { if (!c.v) this.err('مرجع غير مُهيأ'); return this.store(c.v, rv); }
+    if (c.t.k === 'ref') { if (!c.v) this.err('Uninitialized reference'); return this.store(c.v, rv); }
     if (c.proxy) { c.proxy.set(this.convert(rv, c.t)); return; }
     this.checkAlive(c);
     const t = c.t;
@@ -646,7 +646,7 @@ export class Interp {
         if (rv.t.k !== 'struct' || rv.t.name !== t.name) {
           const sd = this.sd(t.name);
           if (sd.ctors.length) { this.constructWith(c, [{ pre: rv }], false); return; }
-          this.err(`لا يمكن إسناد ${typeName(rv.t)} إلى كائن من نوع ${t.name}` + (rv.t.k === 'ptr' ? ' — القيمة مؤشر، هل تقصد *ptr أو تعريف المتغير كمؤشر؟' : ''));
+          this.err(`Cannot assign ${typeName(rv.t)} to ${t.name}` + (rv.t.k === 'ptr' ? ' — did you mean *ptr?' : ''));
         }
         if (rv.cell && rv.cell !== c) this.copyCell(c, rv.cell);
         return;
@@ -654,13 +654,13 @@ export class Interp {
       case 'array':
         if (t.of.k === 'prim' && t.of.name === 'char' && rv.t.k === 'string') {
           const s: string = rv.v;
-          if (s.length + 1 > t.n) this.err(`النص أطول من حجم المصفوفة char[${t.n}]`);
+          if (s.length + 1 > t.n) this.err(`String is longer than char[${t.n}]`);
           c.v.forEach((e: Cell, i: number) => { e.v = i < s.length ? s.charCodeAt(i) : 0; e.init = true; });
           return;
         }
-        this.err('لا يمكن نسخ مصفوفة كاملة باستخدام = — انسخ العناصر بحلقة');
+        this.err('Arrays cannot be assigned with = — copy elements in a loop');
       case 'vector':
-        if (rv.t.k !== 'vector') this.err(`لا يمكن إسناد ${typeName(rv.t)} إلى ${typeName(t)}`);
+        if (rv.t.k !== 'vector') this.err(`Cannot assign ${typeName(rv.t)} to ${typeName(t)}`);
         if (rv.cell && rv.cell !== c) this.copyCell(c, rv.cell);
         return;
       default:
@@ -675,34 +675,34 @@ export class Interp {
       case 'prim':
         if (t.name === 'void') return undefined;
         if (s.k === 'prim') {
-          if (s.name === 'void') this.err('لا يمكن استخدام قيمة دالة void');
+          if (s.name === 'void') this.err('void value used');
           return numConv(rv.v, t.name);
         }
         if (s.k === 'ptr' || s.k === 'nullptr') {
           if (t.name === 'bool') return rv.v === null ? 0 : 1;
           if (explicit) return rv.v === null ? 0 : this.addrOf(rv.v);
-          this.err(`لا يمكن تحويل مؤشر (${typeName(s)}) إلى ${t.name}` + (s.k === 'ptr' ? ' — هل تقصد *ptr أو ptr->field ؟' : ''));
+          this.err(`Cannot convert pointer (${typeName(s)}) to ${t.name}` + (s.k === 'ptr' ? ' — did you mean *ptr or ptr->field?' : ''));
         }
         if (s.k === 'istream') return this.cinFail ? 0 : 1;
-        if (s.k === 'string') this.err(`لا يمكن تحويل string إلى ${t.name} — استخدم stoi() أو stod()`);
-        this.err(`لا يمكن تحويل ${typeName(s)} إلى ${t.name}`);
+        if (s.k === 'string') this.err(`Cannot convert string to ${t.name} — use stoi() or stod()`);
+        this.err(`Cannot convert ${typeName(s)} to ${t.name}`);
       case 'string':
         if (s.k === 'string') return rv.v;
         if (s.k === 'prim' && s.name === 'char') return String.fromCharCode(rv.v < 0 ? rv.v + 256 : rv.v);
-        this.err(`لا يمكن تحويل ${typeName(s)} إلى string` + (s.k === 'prim' ? ' — استخدم to_string()' : ''));
+        this.err(`Cannot convert ${typeName(s)} to string` + (s.k === 'prim' ? ' — use to_string()' : ''));
       case 'ptr':
         if (s.k === 'nullptr') return null;
         if (s.k === 'ptr') {
           if (!explicit && rv.v !== null) {
             const a = typeName(t.to), b = typeName(s.to);
-            if (a !== b && a !== 'void' && b !== 'void') this.err(`لا يمكن إسناد مؤشر من نوع ${b}* إلى مؤشر من نوع ${a}*`);
+            if (a !== b && a !== 'void' && b !== 'void') this.err(`Cannot assign ${b}* to ${a}*`);
           }
           return rv.v;
         }
         if (s.k === 'prim' && rv.v === 0 && !isFloatName(s.name)) return null;
-        if (s.k === 'string' && t.to.k === 'prim' && t.to.name === 'char') this.err('char* للنصوص غير مدعوم في المُصوِّر — استخدم string');
-        if (s.k === 'struct') this.err(`لا يمكن إسناد كائن ${s.name} إلى مؤشر ${typeName(t)} — هل نسيت & لأخذ العنوان، أو new ؟`);
-        this.err(`لا يمكن إسناد ${typeName(s)} إلى مؤشر ${typeName(t)}`);
+        if (s.k === 'string' && t.to.k === 'prim' && t.to.name === 'char') this.err('char* strings are not supported — use string');
+        if (s.k === 'struct') this.err(`Cannot assign ${s.name} object to ${typeName(t)} — missing & or new?`);
+        this.err(`Cannot assign ${typeName(s)} to ${typeName(t)}`);
       default:
         return rv.v;
     }
@@ -721,8 +721,8 @@ export class Interp {
   }
 
   ptrAdd(p: any, n: number): any {
-    if (p === null) this.err('لا يمكن إجراء حساب مؤشرات على nullptr');
-    if (p.garbage) this.err('لا يمكن إجراء حساب مؤشرات على مؤشر غير مُهيأ');
+    if (p === null) this.err('Pointer arithmetic on nullptr');
+    if (p.garbage) this.err('Pointer arithmetic on an uninitialized pointer');
     n = Math.trunc(n);
     if (n === 0) return p;
     let base = p.base;
@@ -730,10 +730,10 @@ export class Interp {
     if (!base) {
       const t: Cell = p.target;
       if (t.parent && (t.parent.t.k === 'array' || t.parent.t.k === 'vector')) { base = t.parent; idx = t.key; }
-      else this.err('حساب المؤشرات (p + n أو p++) مسموح فقط داخل مصفوفة — هذا المؤشر يشير إلى متغير واحد فقط');
+      else this.err('Pointer arithmetic is only valid inside an array');
     }
     const ni = idx + n;
-    if (ni < 0 || ni > base.v.length) this.err(`المؤشر خرج من حدود المصفوفة (الموضع ${ni} بينما الحجم ${base.v.length})`);
+    if (ni < 0 || ni > base.v.length) this.err(`Pointer out of array bounds (index ${ni}, size ${base.v.length})`);
     return { target: base.v[ni] ?? null, base, idx: ni };
   }
 
@@ -747,15 +747,15 @@ export class Interp {
 
   deref(rv: RV, src?: string): Cell {
     const what = src ? `'${src}'` : '';
-    if (rv.t.k === 'nullptr' || rv.v === null) this.err(`Segmentation fault 💥: محاولة الوصول إلى الذاكرة عبر المؤشر ${what} وقيمته nullptr (لا يشير إلى أي شيء)`);
-    if (rv.t.k !== 'ptr') this.err(`لا يمكن استخدام * أو -> على ${what} لأنه ليس مؤشراً (نوعه ${typeName(rv.t)})` + (rv.t.k === 'struct' ? " — استخدم '.' للوصول للحقول" : ''));
+    if (rv.t.k === 'nullptr' || rv.v === null) this.err(`Segmentation fault: dereferencing ${what} which is nullptr`);
+    if (rv.t.k !== 'ptr') this.err(`Cannot use * or -> on ${what}: not a pointer (${typeName(rv.t)})` + (rv.t.k === 'struct' ? " — use '.'" : ''));
     const p = rv.v;
-    if (p.garbage) this.err(`Segmentation fault 💥: المؤشر ${what} غير مُهيأ — يحمل عنواناً عشوائياً (garbage). أعطه قيمة أولاً (nullptr أو عنوان أو new)`);
-    if (!p.target) this.err(`الوصول خارج حدود المصفوفة عبر المؤشر ${what}`);
+    if (p.garbage) this.err(`Segmentation fault: pointer ${what} is uninitialized (garbage address)`);
+    if (!p.target) this.err(`Out of bounds access through ${what}`);
     const r: Cell = p.target.root;
     if (!r.alive) {
-      if (r.heap) this.err(`Use-after-free 💥: المؤشر ${what} يشير إلى ذاكرة تم تحريرها بـ delete — مؤشر معلّق (dangling pointer)`);
-      this.err(`المؤشر ${what} يشير إلى متغير محلي انتهى عمره (خرج من نطاقه)`);
+      if (r.heap) this.err(`Use-after-free: ${what} points to deleted memory (dangling pointer)`);
+      this.err(`${what} points to a local variable that is out of scope`);
     }
     return p.target;
   }
@@ -763,21 +763,21 @@ export class Interp {
   truthy(rv: RV): boolean {
     switch (rv.t.k) {
       case 'prim':
-        if (rv.t.name === 'void') this.err('لا يمكن استخدام قيمة دالة void كشرط');
+        if (rv.t.name === 'void') this.err('void value used as a condition');
         return rv.v !== 0;
       case 'ptr': return rv.v !== null;
       case 'nullptr': return false;
       case 'istream': return !this.cinFail;
-      case 'string': this.err('لا يمكن استخدام string مباشرة كشرط — استخدم .empty() مثلاً');
-      default: this.err(`لا يمكن استخدام ${typeName(rv.t)} كشرط`);
+      case 'string': this.err('string cannot be used as a condition');
+      default: this.err(`${typeName(rv.t)} cannot be used as a condition`);
     }
   }
 
-  toNum(rv: RV, what = 'القيمة'): number {
+  toNum(rv: RV, what = 'value'): number {
     if (rv.t.k === 'prim' && rv.t.name !== 'void') return rv.v;
-    this.err(`${what} يجب أن تكون رقماً، لكنها من نوع ${typeName(rv.t)}`);
+    this.err(`${what} must be a number, got ${typeName(rv.t)}`);
   }
-  toInt(rv: RV, what = 'القيمة'): number { return Math.trunc(this.toNum(rv, what)); }
+  toInt(rv: RV, what = 'value'): number { return Math.trunc(this.toNum(rv, what)); }
 
   cond(e: Expr): boolean {
     this.inCond++;
@@ -822,7 +822,7 @@ export class Interp {
     if (this.isLvalExpr(e)) return this.evalL(e);
     if (e.t === 'call') {
       const r = this.callExpr(e);
-      if (!r || r.t.k === 'prim' && r.t.name === 'void') this.err('الدالة لا تُعيد قيمة (void)');
+      if (!r || r.t.k === 'prim' && r.t.name === 'void') this.err('Function returns void');
       return r.cell && !r.cell.temp && r.t.k === 'struct' ? r.cell : r.cell && r.cell.t.k !== 'array' && (r.t.k === 'struct' || r.t.k === 'vector') ? r.cell : this.tempFrom(r);
     }
     return this.tempFrom(this.ev(e));
@@ -857,13 +857,13 @@ export class Interp {
         this.ev(e.l);
         return this.evalL(e.r);
     }
-    this.err(`التعبير '${e.s ?? ''}' لا يمكن الإسناد إليه أو أخذ عنوانه (ليس lvalue)`);
+    this.err(`'${e.s ?? ''}' is not an lvalue`);
   }
 
   undefinedName(e: Expr): never {
-    if (this.prog.funcs.has(e.name)) this.err(`'${e.name}' دالة — هل نسيت الأقواس () ؟`);
-    if (e.scope) this.err(`'${e.scope}::${e.name}' غير معرّف`);
-    this.err(`المتغير '${e.name}' غير معرّف (was not declared in this scope)`);
+    if (this.prog.funcs.has(e.name)) this.err(`'${e.name}' is a function — missing ()?`);
+    if (e.scope) this.err(`'${e.scope}::${e.name}' is not declared`);
+    this.err(`'${e.name}' was not declared in this scope`);
   }
 
   charProxy(s: Cell, i: number): Cell {
@@ -882,23 +882,23 @@ export class Interp {
     const a = e.a;
     let base: Cell | null = null;
     if (this.isLvalExpr(a)) base = this.evalL(a);
-    const i = this.toInt(this.ev(e.i), 'الفهرس (index)');
+    const i = this.toInt(this.ev(e.i), 'index');
     if (base) {
       if (base.t.k === 'array' || base.t.k === 'vector') {
         this.checkAlive(base);
         const n = base.v.length;
         if (i < 0 || i >= n) {
-          const kind = base.t.k === 'vector' ? 'الـ vector' : 'المصفوفة';
-          this.err(`💥 خارج حدود ${kind} '${a.s}': الفهرس ${i} لكن الحجم ${n}` + (n ? ` (الفهارس المسموحة من 0 إلى ${n - 1})` : ' (فارغة)'));
+          const kind = base.t.k === 'vector' ? 'vector' : 'array';
+          this.err(`Out of bounds: ${kind} '${a.s}' index ${i}, size ${n}` + (n ? ` (valid 0..${n - 1})` : ' (empty)'));
         }
         return base.v[i];
       }
       if (base.t.k === 'string') {
         this.checkAlive(base);
-        if (i < 0 || i > base.v.length) this.err(`💥 خارج حدود النص '${a.s}': الفهرس ${i} وطول النص ${base.v.length}`);
+        if (i < 0 || i > base.v.length) this.err(`Out of bounds: string '${a.s}' index ${i}, length ${base.v.length}`);
         return this.charProxy(base, i);
       }
-      if (base.t.k === 'struct') this.err(`لا يمكن استخدام [] على كائن ${base.t.name}`);
+      if (base.t.k === 'struct') this.err(`Cannot use [] on ${base.t.name}`);
       return this.ptrIndex(this.read(base), i, e);
     }
     const rv = this.ev(a);
@@ -907,18 +907,18 @@ export class Interp {
   }
 
   ptrIndex(rv: RV, i: number, e: Expr): Cell {
-    if (rv.t.k !== 'ptr') this.err(`لا يمكن استخدام [] على '${e.a.s}' من نوع ${typeName(rv.t)}`);
+    if (rv.t.k !== 'ptr') this.err(`Cannot use [] on '${e.a.s}' (${typeName(rv.t)})`);
     if (rv.v && !rv.v.garbage && rv.v !== null) {
       const p = rv.v;
       const base = p.base ?? (p.target && p.target.parent && (p.target.parent.t.k === 'array' || p.target.parent.t.k === 'vector') ? p.target.parent : null);
       const idx = p.base ? p.idx : base ? p.target.key : 0;
       if (base) {
         const ni = idx + i;
-        if (ni < 0 || ni >= base.v.length) this.err(`💥 خارج حدود المصفوفة عبر المؤشر '${e.a.s}': الموضع ${ni} والحجم ${base.v.length}`);
+        if (ni < 0 || ni >= base.v.length) this.err(`Out of bounds through '${e.a.s}': index ${ni}, size ${base.v.length}`);
         if (!base.root.alive) this.deref(rv, e.a.s);
         return base.v[ni];
       }
-      if (i !== 0) this.err(`💥 '${e.a.s}[${i}]': المؤشر يشير إلى متغير واحد وليس مصفوفة`);
+      if (i !== 0) this.err(`'${e.a.s}[${i}]': pointer does not point into an array`);
     }
     return this.deref(rv, e.a.s);
   }
@@ -927,21 +927,21 @@ export class Interp {
     let obj: Cell;
     if (e.arrow) {
       const p = this.ev(e.e);
-      if (p.t.k !== 'ptr' && p.t.k !== 'nullptr') this.err(`'->' يُستخدم مع المؤشرات فقط، و '${e.e.s}' ليس مؤشراً — استخدم '.' بدلاً منه`);
+      if (p.t.k !== 'ptr' && p.t.k !== 'nullptr') this.err(`'${e.e.s}' is not a pointer — use '.' instead of '->'`);
       obj = this.deref(p, e.e.s);
     } else {
       obj = this.evalLorTemp(e.e);
       if (obj.t.k === 'ref') obj = obj.v;
-      if (obj.t.k === 'ptr') this.err(`'${e.e.s}' مؤشر — استخدم '->' بدلاً من '.' (أو (*${e.e.s}).${e.name})`);
+      if (obj.t.k === 'ptr') this.err(`'${e.e.s}' is a pointer — use '->' instead of '.'`);
     }
-    if (obj.t.k !== 'struct') this.err(`لا يمكن الوصول إلى '.${e.name}' في قيمة من نوع ${typeName(obj.t)}`);
+    if (obj.t.k !== 'struct') this.err(`Cannot access '.${e.name}' on ${typeName(obj.t)}`);
     this.checkAlive(obj);
     if (!Object.prototype.hasOwnProperty.call(obj.v, e.name)) {
       const st = this.statics.get(`${obj.t.name}::${e.name}`);
       if (st) return st;
       const sd = this.sd(obj.t.name);
-      if (sd.methods.has(e.name)) this.err(`'${e.name}' دالة في ${obj.t.name} — استدعها بالأقواس ${e.name}()`);
-      this.err(`النوع ${obj.t.name} لا يحتوي على عضو اسمه '${e.name}'`);
+      if (sd.methods.has(e.name)) this.err(`'${e.name}' is a method of ${obj.t.name} — call it with ()`);
+      this.err(`${obj.t.name} has no member named '${e.name}'`);
     }
     const f: Cell = obj.v[e.name];
     return f.t.k === 'ref' ? f.v : f;
@@ -956,7 +956,7 @@ export class Interp {
       case 'null': return { t: NULLT, v: null };
       case 'this': {
         const fr = this.frame;
-        if (!fr || !fr.thisCell) this.err('this متاح فقط داخل دوال الكلاس');
+        if (!fr || !fr.thisCell) this.err("'this' is only available inside member functions");
         return { t: { k: 'ptr', to: fr.thisCell.t }, v: { target: fr.thisCell } };
       }
       case 'id': {
@@ -995,7 +995,7 @@ export class Interp {
       case 'initlist': return { t: { k: 'initlist' }, v: e.items };
       case 'comma': this.ev(e.l); return this.ev(e.r);
     }
-    this.err('تعبير غير مدعوم: ' + e.t);
+    this.err('Unsupported expression: ' + e.t);
   }
 
   sizeofExpr(e: Expr): number {
@@ -1016,18 +1016,18 @@ export class Interp {
   unExpr(e: Expr): RV {
     if (e.op === '&') {
       const c = this.evalL(e.e);
-      if (c.proxy) this.err('أخذ عنوان حرف داخل string غير مدعوم');
+      if (c.proxy) this.err('Taking the address of a string character is not supported');
       return { t: { k: 'ptr', to: c.t }, v: this.ptrTo(c) };
     }
     if (e.op === '*') return this.read(this.deref(this.ev(e.e), e.e.s));
     const v = this.ev(e.e);
     if (e.op === '!') return { t: BOOL, v: this.truthy(v) ? 0 : 1 };
-    if (v.t.k !== 'prim') this.err(`العملية ${e.op} تحتاج رقماً، لكن '${e.e.s}' من نوع ${typeName(v.t)}`);
+    if (v.t.k !== 'prim') this.err(`Operator ${e.op} needs a number, '${e.e.s}' is ${typeName(v.t)}`);
     const rt = isFloatName(v.t.name) ? v.t : (v.t.name === 'long' || v.t.name === 'long long' ? v.t : INT);
     if (e.op === '-') return { t: rt, v: numConv(-v.v, rt.name) };
     if (e.op === '+') return { t: rt, v: v.v };
-    if (e.op === '~') { if (isFloatName(v.t.name)) this.err('~ لا يعمل مع الأعداد العشرية'); return { t: rt, v: numConv(~v.v, rt.name) }; }
-    this.err('عملية غير مدعومة ' + e.op);
+    if (e.op === '~') { if (isFloatName(v.t.name)) this.err('~ does not work on floating point'); return { t: rt, v: numConv(~v.v, rt.name) }; }
+    this.err('Unsupported operator ' + e.op);
   }
 
   incdec(c: Cell, op: string, src: string) {
@@ -1035,9 +1035,9 @@ export class Interp {
     const d = op === '++' ? 1 : -1;
     if (cur.t.k === 'ptr') this.store(c, { t: cur.t, v: this.ptrAdd(cur.v, d) });
     else if (cur.t.k === 'prim') {
-      if (cur.t.name === 'bool' && d < 0) this.err('لا يمكن استخدام -- مع bool');
+      if (cur.t.name === 'bool' && d < 0) this.err('-- cannot be used on bool');
       this.store(c, { t: cur.t, v: cur.v + d });
-    } else this.err(`لا يمكن استخدام ${op} مع ${typeName(cur.t)}`);
+    } else this.err(`${op} cannot be used on ${typeName(cur.t)}`);
     this.noteStore(src, c);
   }
 
@@ -1045,11 +1045,11 @@ export class Interp {
     const c = cell.t.k === 'ref' ? cell.v : cell;
     if (c.proxy) { this.event(`${src} = ${charDisp(c.proxy.get())}`); return; }
     if (c.t.k === 'ptr') {
-      if (c.v === null) this.event(`${src} = nullptr ← لا يشير إلى أي شيء`);
-      else if (c.v && c.v.target) this.event(`${src} ← أصبح يشير إلى ${this.label(c.v.target)}`);
+      if (c.v === null) this.event(`${src} = nullptr`);
+      else if (c.v && c.v.target) this.event(`${src} → ${this.label(c.v.target)}`);
       else this.event(`${src} = ${this.dispCell(c)}`);
-    } else if (c.t.k === 'struct') this.event(`نسخ جميع حقول الكائن إلى ${src}`);
-    else if (c.t.k === 'vector') this.event(`نسخ الـ vector إلى ${src}`);
+    } else if (c.t.k === 'struct') this.event(`copy → ${src}`);
+    else if (c.t.k === 'vector') this.event(`copy → ${src}`);
     else this.event(`${src} = ${this.dispCell(c)}`);
   }
 
@@ -1082,7 +1082,7 @@ export class Interp {
     const l = this.ev(e.l);
     if (e.op === '<<' && l.t.k === 'ostream') { this.output(e.r); return l; }
     if (e.op === '>>' && l.t.k === 'istream') { this.inputTo(e.r); return l; }
-    if (l.t.k === 'ostream' || l.t.k === 'istream') this.err(l.t.k === 'ostream' ? 'مع cout استخدم << وليس >>' : 'مع cin استخدم >> وليس <<');
+    if (l.t.k === 'ostream' || l.t.k === 'istream') this.err(l.t.k === 'ostream' ? 'use << with cout' : 'use >> with cin');
     const r = this.ev(e.r);
     return this.binop(e.op, l, r);
   }
@@ -1097,13 +1097,13 @@ export class Interp {
       if (op === '+' && bt.k === 'ptr' && at.k === 'prim') return { t: bt, v: this.ptrAdd(b.v, a.v) };
       if (op === '-' && at.k === 'ptr' && bt.k === 'ptr') {
         const pa = a.v, pb = b.v;
-        if (!pa || !pb || pa.garbage || pb.garbage) this.err('طرح مؤشرات غير صالح');
+        if (!pa || !pb || pa.garbage || pb.garbage) this.err('Invalid pointer subtraction');
         const ba = pa.base ?? null, bb = pb.base ?? null;
-        if (!ba || ba !== bb) this.err('طرح مؤشرين مسموح فقط إذا كانا داخل نفس المصفوفة');
+        if (!ba || ba !== bb) this.err('Pointer subtraction requires pointers into the same array');
         return { t: LL, v: pa.idx - pb.idx };
       }
       if (CMP.includes(op)) {
-        const norm = (x: RV) => (x.t.k === 'ptr' || x.t.k === 'nullptr' ? x.v : x.t.k === 'prim' && x.v === 0 ? null : this.err('لا يمكن مقارنة مؤشر برقم غير 0'));
+        const norm = (x: RV) => (x.t.k === 'ptr' || x.t.k === 'nullptr' ? x.v : x.t.k === 'prim' && x.v === 0 ? null : this.err('Cannot compare a pointer with a non-zero number'));
         const av = norm(a), bv = norm(b);
         if (op === '==') return { t: BOOL, v: this.ptrEq(av, bv) ? 1 : 0 };
         if (op === '!=') return { t: BOOL, v: this.ptrEq(av, bv) ? 0 : 1 };
@@ -1111,31 +1111,31 @@ export class Interp {
         const res = op === '<' ? x < y : op === '>' ? x > y : op === '<=' ? x <= y : x >= y;
         return { t: BOOL, v: res ? 1 : 0 };
       }
-      this.err(`العملية ${op} غير مسموحة على المؤشرات`);
+      this.err(`Operator ${op} is not allowed on pointers`);
     }
     if (at.k === 'string' || bt.k === 'string') {
       const toS = (x: RV): string => {
         if (x.t.k === 'string') return x.v;
         if (x.t.k === 'prim' && x.t.name === 'char') return String.fromCharCode(x.v < 0 ? x.v + 256 : x.v);
-        this.err(`لا يمكن دمج string مع ${typeName(x.t)} مباشرة — استخدم to_string()`);
+        this.err(`Cannot concatenate string with ${typeName(x.t)} — use to_string()`);
       };
       if (op === '+') {
-        if (a.lit && b.lit) this.err('لا يمكن جمع نصين حرفيين "..." + "..." مباشرة في C++');
+        if (a.lit && b.lit) this.err('Cannot add two string literals');
         return { t: STR, v: toS(a) + toS(b) };
       }
       if (CMP.includes(op)) {
-        if (at.k !== 'string' || bt.k !== 'string') this.err('مقارنة string مع غير string غير مسموحة');
+        if (at.k !== 'string' || bt.k !== 'string') this.err('Cannot compare string with non-string');
         const x: string = a.v, y: string = b.v;
         const res = op === '==' ? x === y : op === '!=' ? x !== y : op === '<' ? x < y : op === '>' ? x > y : op === '<=' ? x <= y : x >= y;
         return { t: BOOL, v: res ? 1 : 0 };
       }
-      this.err(`العملية ${op} غير مسموحة على string`);
+      this.err(`Operator ${op} is not allowed on string`);
     }
     if (at.k !== 'prim' || bt.k !== 'prim') {
       const st = at.k === 'struct' || bt.k === 'struct';
-      this.err(`العملية ${op} غير مدعومة بين ${typeName(at)} و ${typeName(bt)}` + (st ? ' (التحميل الزائد للمعاملات operator overloading غير مدعوم)' : ''));
+      this.err(`Operator ${op} not supported between ${typeName(at)} and ${typeName(bt)}` + (st ? ' (operator overloading is not supported)' : ''));
     }
-    if (at.name === 'void' || bt.name === 'void') this.err('لا يمكن استخدام قيمة دالة void في عملية حسابية');
+    if (at.name === 'void' || bt.name === 'void') this.err('void value used in an expression');
     const fl = isFloatName(at.name) || isFloatName(bt.name);
     const big = (n: string) => n === 'long' || n === 'long long' || n === 'unsigned long' || n === 'unsigned long long';
     const rt = fl ? DBL : big(at.name) || big(bt.name) ? LL : INT;
@@ -1146,11 +1146,11 @@ export class Interp {
       case '-': return num(x - y);
       case '*': return rt === INT ? { t: INT, v: Math.imul(x, y) } : num(x * y);
       case '/':
-        if (!fl && y === 0) this.err('💥 قسمة على صفر (Division by zero)');
+        if (!fl && y === 0) this.err('Division by zero');
         return num(fl ? x / y : Math.trunc(x / y));
       case '%':
-        if (fl) this.err('% لا يعمل مع الأعداد العشرية (float/double) — استخدم fmod()');
-        if (y === 0) this.err('💥 باقي القسمة على صفر (modulo by zero)');
+        if (fl) this.err('% does not work on float/double — use fmod()');
+        if (y === 0) this.err('Modulo by zero');
         return num(x % y);
       case '==': return { t: BOOL, v: x === y ? 1 : 0 };
       case '!=': return { t: BOOL, v: x !== y ? 1 : 0 };
@@ -1159,7 +1159,7 @@ export class Interp {
       case '<=': return { t: BOOL, v: x <= y ? 1 : 0 };
       case '>=': return { t: BOOL, v: x >= y ? 1 : 0 };
     }
-    if (fl) this.err(`العملية ${op} لا تعمل مع الأعداد العشرية`);
+    if (fl) this.err(`Operator ${op} does not work on floating point`);
     switch (op) {
       case '&': return num(rt === INT ? x & y : Number(BigInt(x) & BigInt(y)));
       case '|': return num(rt === INT ? x | y : Number(BigInt(x) | BigInt(y)));
@@ -1167,7 +1167,7 @@ export class Interp {
       case '<<': return num(rt === INT ? x << y : x * Math.pow(2, y));
       case '>>': return num(rt === INT ? x >> y : Math.floor(x / Math.pow(2, y)));
     }
-    this.err('عملية غير مدعومة ' + op);
+    this.err('Unsupported operator ' + op);
   }
 
   // =================== I/O ===================
@@ -1176,7 +1176,7 @@ export class Interp {
     this.width = 0;
     this.out += s;
     this.printed += s;
-    if (this.out.length > 200000) this.err('الإخراج كبير جداً');
+    if (this.out.length > 200000) this.err('Output too large');
   }
 
   fmtOut(rv: RV): string {
@@ -1184,7 +1184,7 @@ export class Interp {
     switch (t.k) {
       case 'string': return rv.v;
       case 'prim':
-        if (t.name === 'void') this.err('لا يمكن طباعة قيمة دالة void');
+        if (t.name === 'void') this.err('Cannot print a void value');
         if (t.name === 'char' || t.name === 'unsigned char') return String.fromCharCode(rv.v < 0 ? rv.v + 256 : rv.v);
         if (t.name === 'bool') return this.boolalpha ? (rv.v ? 'true' : 'false') : rv.v ? '1' : '0';
         if (isFloatName(t.name)) return this.fixed ? rv.v.toFixed(this.precision) : fmtG(rv.v, this.precision);
@@ -1194,10 +1194,10 @@ export class Interp {
         if (rv.v === null) return '0';
         if (rv.v.garbage) return '0x7f3a9c2e10';
         return hex(this.addrOf(rv.v));
-      case 'struct': this.err(`لا يمكن طباعة كائن ${t.name} كاملاً بـ cout — اطبع حقوله واحداً واحداً`);
-      case 'vector': this.err('لا يمكن طباعة vector كاملاً بـ cout — استخدم حلقة');
+      case 'struct': this.err(`Cannot print a ${t.name} object with cout — print its fields`);
+      case 'vector': this.err('Cannot print a vector with cout — use a loop');
     }
-    this.err(`لا يمكن طباعة قيمة من نوع ${typeName(t)}`);
+    this.err(`Cannot print ${typeName(t)}`);
   }
 
   output(e: Expr) {
@@ -1227,7 +1227,7 @@ export class Interp {
   }
 
   noInput(src: string): never {
-    throw new StopSig(`⌨ البرنامج ينتظر إدخالاً من المستخدم (cin >> ${src}) لكن خانة «الإدخال» فارغة أو انتهت قيمها.\nاكتب القيم في خانة الإدخال (كل قيمة في سطر أو بينها مسافة) ثم اضغط «تشغيل» مرة أخرى.`, 'input');
+    throw new StopSig(`Waiting for input (cin >> ${src}) — stdin is empty. Add values to stdin and run again.`, 'input');
   }
 
   inputTo(e: Expr) {
@@ -1258,16 +1258,16 @@ export class Interp {
       if (!m) {
         this.cinFail = true;
         this.store(c, { t: INT, v: 0 });
-        this.event(`⚠ الإدخال '${rest.split(/\s/)[0]}' ليس رقماً — cin دخل في حالة فشل (fail) وأصبحت القيمة 0`);
-        if (!this.inCond) this.err(`الإدخال '${rest.split(/\s/)[0]}' ليس رقماً صالحاً للمتغير ${e.s} (نوعه ${t.name}) — في البرنامج الحقيقي يدخل cin في حالة فشل وغالباً تحدث حلقة لا نهائية`);
+        this.event(`cin failed on '${rest.split(/\s/)[0]}'`);
+        if (!this.inCond) this.err(`Input '${rest.split(/\s/)[0]}' is not a valid ${t.name} for ${e.s}`);
         return;
       }
       tok = m[0];
       this.inPos += tok.length;
       this.store(c, { t: isFloatName(t.name) ? DBL : LL, v: isFloatName(t.name) ? parseFloat(tok) : parseInt(tok, 10) });
-    } else this.err(`لا يمكن القراءة بـ cin إلى متغير من نوع ${typeName(t)}`);
+    } else this.err(`Cannot read ${typeName(t)} with cin`);
     this.echo(tok);
-    this.event(`⌨ قراءة من الإدخال: ${e.s} = ${this.dispCell(c)}`);
+    this.event(`cin: ${e.s} = ${this.dispCell(c)}`);
   }
 
   getline(sc: Cell, src: string) {
@@ -1281,7 +1281,7 @@ export class Interp {
     this.inPos = j + 1;
     this.store(sc, { t: STR, v: line });
     this.out += '\u0001' + line + '\u0002\n';
-    this.event(`⌨ getline قرأ السطر: ${JSON.stringify(line)}`);
+    this.event(`getline: ${JSON.stringify(line)}`);
   }
 
   // =================== calls ===================
@@ -1328,11 +1328,11 @@ export class Interp {
   pickOverload(cands: FuncDef[], args: any[], name: string): FuncDef {
     const n = args.length;
     const withBody = cands.filter((f) => f.body);
-    if (!withBody.length) this.err(`الدالة ${name} مُعلنة لكن لم يُكتب جسمها (تعريفها)`);
+    if (!withBody.length) this.err(`Function ${name} is declared but not defined`);
     const ok = withBody.filter((f) => n <= f.params.length && n >= f.params.filter((p) => !p.def).length);
     if (!ok.length) {
-      const counts = Array.from(new Set(withBody.map((f) => f.params.length))).join(' أو ');
-      this.err(`لا توجد نسخة من ${name} تقبل ${n} معاملات (المتاح: ${counts})`);
+      const counts = Array.from(new Set(withBody.map((f) => f.params.length))).join(' or ');
+      this.err(`No overload of ${name} takes ${n} arguments (available: ${counts})`);
     }
     if (ok.length === 1) return ok[0];
     let best = ok[0];
@@ -1356,14 +1356,14 @@ export class Interp {
   }
 
   callFunction(fn: FuncDef, args: any[], thisCell: Cell | null): RV | undefined {
-    if (!fn.body) this.err(`الدالة ${fn.name} ليس لها جسم (تعريف)`);
+    if (!fn.body) this.err(`Function ${fn.name} has no body`);
     const vals: any[] = [];
     const ptypes: Type[] = fn.params.map((p) => this.paramType(p));
     for (let i = 0; i < fn.params.length; i++) {
       const p = fn.params[i];
       const pt = ptypes[i];
       const a = i < args.length ? args[i] : p.def;
-      if (a === undefined) this.err(`عدد المعاملات المُمرّرة إلى ${fn.name} غير كافٍ`);
+      if (a === undefined) this.err(`Too few arguments to ${fn.name}`);
       if (pt.k === 'ref') {
         if (a.pre) vals.push(a.pre.cell ?? this.tempFrom(a.pre));
         else vals.push(this.evalLorTemp(a));
@@ -1371,8 +1371,8 @@ export class Interp {
         vals.push(a.pre ? a.pre : this.ev(a));
       }
     }
-    if (args.length > fn.params.length) this.err(`تم تمرير ${args.length} معاملات إلى ${fn.name} بينما تقبل ${fn.params.length}`);
-    if (this.frames.length >= 200) this.err('💥 Stack overflow: عمق الاستدعاءات تجاوز 200 — غالباً تكرار (recursion) بدون شرط توقف');
+    if (args.length > fn.params.length) this.err(`Too many arguments to ${fn.name} (${args.length} given, ${fn.params.length} expected)`);
+    if (this.frames.length >= 200) this.err('Stack overflow: recursion deeper than 200 calls');
     const name = fn.cls ? `${fn.cls}::${fn.isDtor ? '~' : ''}${fn.name}` : fn.name;
     const frame: Frame = { id: this.nextFrameId++, name, fn, scopes: [{ map: new Map(), sp: this.sp }], thisCell, line: fn.line, spSave: this.sp };
     this.frames.push(frame);
@@ -1386,12 +1386,12 @@ export class Interp {
       if (p.name) frame.scopes[0].map.set(p.name, cell);
       parts.push(`${cell.name} = ${this.dispCell(cell)}`);
     });
-    const plist = parts.join('، ');
+    const plist = parts.join(', ');
     let note: string;
-    if (fn.isCtor) note = `📦 تشغيل الـ constructor ${fn.cls}(${plist}) لتجهيز ${fn.cls} الجديدة`;
-    else if (fn.isDtor) note = `🧹 استدعاء الـ destructor ${name}() قبل تحرير الكائن`;
-    else if (fn.name === 'main' && !fn.cls) note = '▶ بدء تنفيذ الدالة main()';
-    else note = `📞 الدخول إلى الدالة ${name}(${plist})`;
+    if (fn.isCtor) note = `${fn.cls}(${plist})`;
+    else if (fn.isDtor) note = `${name}()`;
+    else if (fn.name === 'main' && !fn.cls) note = 'main()';
+    else note = `${name}(${plist})`;
     this.curLine = fn.line;
     this.snap('call', fn.line, note);
     let ret: RV | undefined;
@@ -1401,7 +1401,7 @@ export class Interp {
       frame.line = fn.endLine;
       this.curLine = fn.endLine;
       if (fn.name === 'main' && !fn.cls) ret = { t: INT, v: 0 };
-      else this.snap('return', fn.endLine, fn.isCtor ? `✔ انتهى الـ constructor — ${fn.cls} جاهزة` : `↩ انتهت ${name} — نرجع إلى المكان الذي استدعاها`);
+      else this.snap('return', fn.endLine, fn.isCtor ? `end ${name}` : `end ${name}`);
     } catch (e) {
       if (e instanceof ReturnSig) ret = e.v;
       else throw e;
@@ -1411,7 +1411,7 @@ export class Interp {
     if (rt.k === 'prim' && rt.name === 'void') return undefined;
     if (fn.isCtor || fn.isDtor) return undefined;
     if (!ret) {
-      this.event(`⚠ الدالة ${name} انتهت بدون return رغم أنها تُعيد ${typeName(rt)}`);
+      this.event(`${name}: missing return`);
       return { t: rt.k === 'ref' ? rt.to : rt, v: 0 };
     }
     if (rt.k === 'ref') return ret;
@@ -1439,8 +1439,8 @@ export class Interp {
       } else this.initField(fc, f, false);
     }
     if (fn.initList?.length) {
-      for (const il of fn.initList) if (!sd.fields.some((f) => f.d.name === il.name)) this.err(`'${il.name}' ليس حقلاً في ${sd.name}`);
-      this.event(`قائمة التهيئة (initializer list): ${parts.join('، ')}`);
+      for (const il of fn.initList) if (!sd.fields.some((f) => f.d.name === il.name)) this.err(`'${il.name}' is not a member of ${sd.name}`);
+      this.event(`init: ${parts.join(', ')}`);
     }
   }
 
@@ -1514,13 +1514,13 @@ export class Interp {
           if (!cands.length) {
             const rv: RV = args[0].pre ? args[0].pre : this.ev(args[0]);
             this.copyCell(c, rv.cell!);
-            this.event(`نسخ كائن ${t.name} (copy constructor الافتراضي)`);
+            this.event(`copy ${t.name}`);
             return;
           }
         }
       }
       if (!args || !args.length) {
-        if (!sd.ctors.some((f) => f.body && f.params.every((p) => p.def))) this.err(`${t.name} لا يحتوي على constructor افتراضي (بدون معاملات) — مرّر القيم المطلوبة`);
+        if (!sd.ctors.some((f) => f.body && f.params.every((p) => p.def))) this.err(`${t.name} has no default constructor`);
       }
       const fn = this.pickOverload(sd.ctors, args ?? [], `${t.name}::${t.name}`);
       this.callFunction(fn, args ?? [], c);
@@ -1531,8 +1531,8 @@ export class Interp {
       if (!args || !args.length) return;
       const a0 = args[0].pre ? args[0].pre : this.ev(args[0]);
       if (a0.t.k === 'vector') { this.store(c, a0); return; }
-      const n = this.toInt(a0, 'حجم الـ vector');
-      if (n < 0 || n > 20000) this.err('حجم vector غير صالح');
+      const n = this.toInt(a0, 'vector size');
+      if (n < 0 || n > 20000) this.err('Invalid vector size');
       const val = args[1] ? (args[1].pre ? args[1].pre : this.ev(args[1])) : null;
       for (let i = 0; i < n; i++) {
         const e = this.vecElem(c, i);
@@ -1572,7 +1572,7 @@ export class Interp {
     const t = c.t;
     switch (t.k) {
       case 'array': {
-        if (items.length > t.n) this.err(`عدد القيم (${items.length}) أكبر من حجم المصفوفة (${t.n})`);
+        if (items.length > t.n) this.err(`Too many initializers (${items.length}) for array of size ${t.n}`);
         if (t.of.k === 'prim' && t.of.name === 'char' && items.length === 1 && items[0].t === 'str') { this.store(c, this.ev(items[0])); return; }
         for (let i = 0; i < t.n; i++) this.initElem(c.v[i], items[i]);
         return;
@@ -1582,7 +1582,7 @@ export class Interp {
         if (sd.ctors.some((x) => x.body)) { this.constructWith(c, items, true); return; }
         const fs = this.layout(t.name).fields;
         const fdefs = sd.fields.filter((f) => !f.isStatic);
-        if (items.length > fs.length) this.err(`عدد القيم (${items.length}) أكبر من عدد حقول ${t.name} (${fs.length})`);
+        if (items.length > fs.length) this.err(`Too many initializers (${items.length}) for ${t.name} (${fs.length} fields)`);
         fs.forEach((f, i) => {
           const fc = c.v[f.name];
           if (i < items.length) this.initElem(fc, items[i]);
@@ -1602,7 +1602,7 @@ export class Interp {
         return;
       }
       default:
-        if (items.length > 1) this.err('قيم كثيرة داخل {} لمتغير واحد');
+        if (items.length > 1) this.err('Too many initializers in {}');
         if (items.length) this.initElem(c, items[0]);
         else this.zeroFill(c);
     }
@@ -1625,11 +1625,11 @@ export class Interp {
       let obj: Cell;
       if (f.arrow) {
         const p = this.ev(f.e);
-        if (p.t.k !== 'ptr' && p.t.k !== 'nullptr') this.err(`'->' يُستخدم مع المؤشرات فقط، و '${f.e.s}' ليس مؤشراً — استخدم '.'`);
+        if (p.t.k !== 'ptr' && p.t.k !== 'nullptr') this.err(`'${f.e.s}' is not a pointer — use '.' instead of '->'`);
         obj = this.deref(p, f.e.s);
       } else {
         obj = this.evalLorTemp(f.e);
-        if (obj.t.k === 'ptr') this.err(`'${f.e.s}' مؤشر — استخدم '->' بدلاً من '.'`);
+        if (obj.t.k === 'ptr') this.err(`'${f.e.s}' is a pointer — use '->' instead of '.'`);
       }
       if (obj.t.k === 'ref') obj = obj.v;
       return this.callMethod(obj, f.name, e.args, e);
@@ -1638,7 +1638,7 @@ export class Interp {
       const name = f.name;
       if (f.scope && f.scope !== 'std' && this.prog.structs.has(f.scope)) {
         const ms = this.sd(f.scope).methods.get(name);
-        if (!ms) this.err(`${f.scope}::${name} غير موجودة`);
+        if (!ms) this.err(`${f.scope}::${name} does not exist`);
         return this.callFunction(this.pickOverload(ms, e.args, `${f.scope}::${name}`), e.args, this.frame?.thisCell ?? null);
       }
       const fr = this.frame;
@@ -1648,15 +1648,15 @@ export class Interp {
         if (ms) return this.callFunction(this.pickOverload(ms, e.args, `${sd!.name}::${name}`), e.args, fr.thisCell);
       }
       const local = !f.scope ? this.lookup(name) : null;
-      if (local && local.t.k !== 'ostream') this.err(`'${name}' متغير وليس دالة`);
+      if (local && local.t.k !== 'ostream') this.err(`'${name}' is a variable, not a function`);
       const fs = this.prog.funcs.get(name);
       if (fs && fs.some((x) => x.body)) return this.callFunction(this.pickOverload(fs, e.args, name), e.args, null);
       const b = this.builtin(name, e.args, e);
       if (b !== NOT_BUILTIN) return b as RV | undefined;
-      if (fs) this.err(`الدالة ${name} مُعلنة (prototype) لكن لم يُكتب جسمها`);
-      this.err(`الدالة '${name}' غير معرّفة`);
+      if (fs) this.err(`Function ${name} is declared but not defined`);
+      this.err(`'${name}' was not declared in this scope`);
     }
-    this.err('صيغة استدعاء غير مدعومة');
+    this.err('Unsupported call');
   }
 
   callMethod(obj: Cell, name: string, args: Expr[], e: Expr): RV | undefined {
@@ -1693,27 +1693,27 @@ export class Interp {
         const sd = this.sd(obj.t.name);
         const ms = sd.methods.get(name);
         if (!ms) {
-          if (Object.prototype.hasOwnProperty.call(obj.v, name)) this.err(`'${name}' حقل (متغير) في ${sd.name} وليس دالة`);
-          this.err(`${sd.isClass ? 'الكلاس' : 'الـ struct'} ${sd.name} لا يحتوي على دالة اسمها '${name}'`);
+          if (Object.prototype.hasOwnProperty.call(obj.v, name)) this.err(`'${name}' is a field of ${sd.name}, not a method`);
+          this.err(`${sd.name} has no method named '${name}'`);
         }
         return this.callFunction(this.pickOverload(ms, args, `${sd.name}::${name}`), args, obj);
       }
     }
-    this.err(`لا يمكن استدعاء .${name}() على قيمة من نوع ${typeName(obj.t)}`);
+    this.err(`Cannot call .${name}() on ${typeName(obj.t)}`);
   }
 
   stringMethod(s: Cell, name: string, args: Expr[], e: Expr): RV | undefined {
     this.checkAlive(s);
     const str: string = s.v;
     const arg = (i: number) => this.ev(args[i]);
-    const argS = (i: number) => { const r = arg(i); return r.t.k === 'string' ? r.v : r.t.k === 'prim' && r.t.name === 'char' ? String.fromCharCode(r.v) : this.err('المعامل يجب أن يكون نصاً'); };
+    const argS = (i: number) => { const r = arg(i); return r.t.k === 'string' ? r.v : r.t.k === 'prim' && r.t.name === 'char' ? String.fromCharCode(r.v) : this.err('Argument must be a string'); };
     const set = (v: string, what: string) => { s.v = v; s.init = true; this.event(`${e.f.e.s}.${name}(): ${what} ← ${JSON.stringify(v)}`); };
     switch (name) {
       case 'size': case 'length': return { t: ULONG, v: str.length };
       case 'empty': return { t: BOOL, v: str.length === 0 ? 1 : 0 };
       case 'substr': {
         const pos = args.length ? this.toInt(arg(0)) : 0;
-        if (pos > str.length) this.err(`substr: الموضع ${pos} أكبر من طول النص ${str.length} (out_of_range)`);
+        if (pos > str.length) this.err(`substr: position ${pos} > length ${str.length} (out_of_range)`);
         const len = args.length > 1 ? this.toInt(arg(1)) : str.length;
         return { t: STR, v: str.substr(pos, len < 0 ? str.length : len) };
       }
@@ -1724,27 +1724,27 @@ export class Interp {
       }
       case 'at': case 'operator[]': {
         const i = this.toInt(arg(0));
-        if (i < 0 || i >= str.length) this.err(`💥 at(${i}) خارج حدود النص (الطول ${str.length}) — out_of_range`);
+        if (i < 0 || i >= str.length) this.err(`at(${i}) out of range (length ${str.length})`);
         const p = this.charProxy(s, i);
         return { t: CHAR, v: p.proxy!.get(), cell: p };
       }
-      case 'back': if (!str.length) this.err('back() على نص فارغ'); { const p = this.charProxy(s, str.length - 1); return { t: CHAR, v: p.proxy!.get(), cell: p }; }
-      case 'front': if (!str.length) this.err('front() على نص فارغ'); { const p = this.charProxy(s, 0); return { t: CHAR, v: p.proxy!.get(), cell: p }; }
-      case 'push_back': set(str + argS(0), 'إضافة حرف'); return VOIDRV;
-      case 'pop_back': if (!str.length) this.err('pop_back() على نص فارغ'); set(str.slice(0, -1), 'حذف آخر حرف'); return VOIDRV;
-      case 'append': set(str + argS(0), 'إلحاق'); return { t: STR, v: s.v, cell: s };
-      case 'clear': set('', 'مسح'); return VOIDRV;
-      case 'insert': { const pos = this.toInt(arg(0)); set(str.slice(0, pos) + argS(1) + str.slice(pos), 'إدراج'); return VOIDRV; }
+      case 'back': if (!str.length) this.err('back() on empty string'); { const p = this.charProxy(s, str.length - 1); return { t: CHAR, v: p.proxy!.get(), cell: p }; }
+      case 'front': if (!str.length) this.err('front() on empty string'); { const p = this.charProxy(s, 0); return { t: CHAR, v: p.proxy!.get(), cell: p }; }
+      case 'push_back': set(str + argS(0), 'push_back'); return VOIDRV;
+      case 'pop_back': if (!str.length) this.err('pop_back() on empty string'); set(str.slice(0, -1), 'pop_back'); return VOIDRV;
+      case 'append': set(str + argS(0), 'append'); return { t: STR, v: s.v, cell: s };
+      case 'clear': set('', 'clear'); return VOIDRV;
+      case 'insert': { const pos = this.toInt(arg(0)); set(str.slice(0, pos) + argS(1) + str.slice(pos), 'insert'); return VOIDRV; }
       case 'erase': {
         const pos = args.length ? this.toInt(arg(0)) : 0;
         const len = args.length > 1 ? this.toInt(arg(1)) : str.length;
-        set(str.slice(0, pos) + str.slice(pos + len), 'حذف');
+        set(str.slice(0, pos) + str.slice(pos + len), 'erase');
         return VOIDRV;
       }
       case 'c_str': case 'data': return { t: STR, v: str };
       case 'compare': { const o = argS(0); return { t: INT, v: str < o ? -1 : str > o ? 1 : 0 }; }
     }
-    this.err(`الدالة string::${name}() غير مدعومة في المُصوِّر`);
+    this.err(`string::${name}() is not supported`);
   }
 
   vectorMethod(vec: Cell, name: string, args: Expr[], e: Expr): RV | undefined {
@@ -1766,25 +1766,25 @@ export class Interp {
           this.initElem(c, { pre: rv });
           els.push(c);
         }
-        this.event(`${src}.${name}(): إضافة عنصر في النهاية ← الحجم أصبح ${els.length}`);
+        this.event(`${src}.${name}() size=${els.length}`);
         return VOIDRV;
       }
       case 'pop_back': {
-        if (!els.length) this.err(`💥 pop_back() على vector فارغ '${src}'`);
+        if (!els.length) this.err(`pop_back() on empty vector '${src}'`);
         this.killCell(els.pop()!);
-        this.event(`${src}.pop_back(): حذف آخر عنصر ← الحجم أصبح ${els.length}`);
+        this.event(`${src}.pop_back() size=${els.length}`);
         return VOIDRV;
       }
       case 'clear':
         els.forEach((c) => this.killCell(c));
         vec.v = [];
-        this.event(`${src}.clear(): حذف كل العناصر`);
+        this.event(`${src}.clear()`);
         return VOIDRV;
-      case 'back': if (!els.length) this.err(`💥 back() على vector فارغ '${src}'`); return elRV(els[els.length - 1]);
-      case 'front': if (!els.length) this.err(`💥 front() على vector فارغ '${src}'`); return elRV(els[0]);
+      case 'back': if (!els.length) this.err(`back() on empty vector '${src}'`); return elRV(els[els.length - 1]);
+      case 'front': if (!els.length) this.err(`front() on empty vector '${src}'`); return elRV(els[0]);
       case 'at': {
         const i = this.toInt(this.ev(args[0]));
-        if (i < 0 || i >= els.length) this.err(`💥 ${src}.at(${i}) خارج الحدود (الحجم ${els.length}) — out_of_range`);
+        if (i < 0 || i >= els.length) this.err(`${src}.at(${i}) out of range (size ${els.length})`);
         return elRV(els[i]);
       }
       case 'resize': {
@@ -1796,9 +1796,9 @@ export class Interp {
         return VOIDRV;
       }
       case 'begin': case 'end': case 'insert': case 'erase': case 'rbegin': case 'rend':
-        this.err(`${name}() تعتمد على iterators وهي غير مدعومة في المُصوِّر — استخدم الفهارس [i] والحلقات`);
+        this.err(`${name}() needs iterators, which are not supported — use indexes`);
     }
-    this.err(`الدالة vector::${name}() غير مدعومة في المُصوِّر`);
+    this.err(`vector::${name}() is not supported`);
   }
 
   builtin(name: string, args: Expr[], e: Expr): RV | undefined | typeof NOT_BUILTIN {
@@ -1812,7 +1812,7 @@ export class Interp {
         this.copyCell(tmp, a);
         this.copyCell(a, b);
         this.copyCell(b, tmp);
-        this.event(`swap: تبديل قيمتي ${args[0].s} و ${args[1].s}`);
+        this.event(`swap(${args[0].s}, ${args[1].s})`);
         return VOIDRV;
       }
       case 'max': case 'min': {
@@ -1823,7 +1823,7 @@ export class Interp {
       }
       case 'abs': case 'labs': case 'llabs': { const r = this.ev(args[0]); return { t: r.t, v: Math.abs(this.toNum(r)) }; }
       case 'fabs': return d(Math.abs(num(0)));
-      case 'sqrt': { const x = num(0); if (x < 0) this.event('⚠ sqrt لعدد سالب = nan'); return d(Math.sqrt(x)); }
+      case 'sqrt': { const x = num(0); if (x < 0) this.event('sqrt of negative = nan'); return d(Math.sqrt(x)); }
       case 'pow': return d(Math.pow(num(0), num(1)));
       case 'floor': return d(Math.floor(num(0)));
       case 'ceil': return d(Math.ceil(num(0)));
@@ -1850,19 +1850,19 @@ export class Interp {
       }
       case 'to_string': {
         const r = this.ev(args[0]);
-        if (r.t.k !== 'prim') this.err('to_string تحتاج رقماً');
+        if (r.t.k !== 'prim') this.err('to_string needs a number');
         return { t: STR, v: isFloatName(r.t.name) ? r.v.toFixed(6) : String(r.v) };
       }
       case 'stoi': case 'stol': case 'stoll': case 'atoi': {
         const r = this.ev(args[0]);
         const m = /^\s*[+-]?\d+/.exec(r.v);
-        if (!m) this.err(`💥 ${name}: النص ${JSON.stringify(r.v)} ليس رقماً (invalid_argument)`);
+        if (!m) this.err(`${name}: ${JSON.stringify(r.v)} is not a number (invalid_argument)`);
         return { t: name === 'stoi' || name === 'atoi' ? INT : LL, v: parseInt(m[0], 10) };
       }
       case 'stod': case 'stof': case 'atof': {
         const r = this.ev(args[0]);
         const v = parseFloat(r.v);
-        if (isNaN(v)) this.err(`💥 ${name}: النص ${JSON.stringify(r.v)} ليس رقماً (invalid_argument)`);
+        if (isNaN(v)) this.err(`${name}: ${JSON.stringify(r.v)} is not a number (invalid_argument)`);
         return d(v);
       }
       case 'exit': throw new ExitSig(args.length ? num(0) : 0);
@@ -1905,18 +1905,18 @@ export class Interp {
   newExpr(e: Expr): RV {
     const et = this.tsType(e.ts);
     if (e.arr !== undefined) {
-      const n = this.toInt(this.ev(e.arr), 'حجم المصفوفة');
-      if (n < 0) this.err(`💥 حجم سالب في new[] (${n})`);
+      const n = this.toInt(this.ev(e.arr), 'array size');
+      if (n < 0) this.err(`Negative size in new[] (${n})`);
       const at = { k: 'array', of: et, n };
       const c = this.allocHeap(at);
-      this.event(`🆕 new ${typeName(et)}[${n}] ← حجز مصفوفة من ${n} عناصر في الـ Heap عند ${hex(c.addr)}`);
+      this.event(`new ${typeName(et)}[${n}]`);
       if (e.brace) this.initFromList(c, e.brace);
       else if (e.valueInit) this.zeroFill(c);
       else c.v.forEach((x: Cell) => this.defaultInit(x, false));
       return { t: { k: 'ptr', to: et }, v: n ? { target: c.v[0], base: c, idx: 0 } : { target: null, base: c, idx: 0 } };
     }
     const c = this.allocHeap(et);
-    this.event(`🆕 new ${typeName(et)} ← إنشاء ${typeName(et)} جديدة في الذاكرة`);
+    this.event(`new ${typeName(et)}`);
     if (et.k === 'struct') this.constructWith(c, e.args ?? null, !!e.brace, e.args !== undefined);
     else if (e.args !== undefined) this.constructWith(c, e.args, !!e.brace, true);
     return { t: { k: 'ptr', to: et }, v: { target: c } };
@@ -1924,21 +1924,21 @@ export class Interp {
 
   deleteExpr(e: Expr) {
     const rv = this.ev(e.e);
-    if (rv.t.k === 'nullptr' || rv.v === null) { this.event(`delete ${e.e.s}: المؤشر nullptr — لا يحدث شيء`); return; }
-    if (rv.t.k !== 'ptr') this.err(`delete يحتاج مؤشراً، و '${e.e.s}' من نوع ${typeName(rv.t)}`);
+    if (rv.t.k === 'nullptr' || rv.v === null) { this.event(`delete nullptr`); return; }
+    if (rv.t.k !== 'ptr') this.err(`delete needs a pointer, '${e.e.s}' is ${typeName(rv.t)}`);
     const p = rv.v;
-    if (p.garbage) this.err(`💥 delete لمؤشر غير مُهيأ '${e.e.s}' — سلوك غير معرّف (crash غالباً)`);
+    if (p.garbage) this.err(`delete on uninitialized pointer '${e.e.s}'`);
     let obj: Cell;
     if (p.base && p.base.root === p.base && p.base.heap && p.idx === 0) {
       obj = p.base;
-      if (!e.arr) this.event(`⚠ تحرير مصفوفة بـ delete بدلاً من delete[] — الصحيح: delete[] ${e.e.s}`);
+      if (!e.arr) this.event(`use delete[] ${e.e.s}`);
     } else {
       obj = p.target;
-      if (!obj || obj.root !== obj) this.err(`💥 delete '${e.e.s}': هذا العنوان ليس بداية كتلة محجوزة بـ new`);
-      if (e.arr) this.event('⚠ استخدام delete[] لكائن مفرد — الصحيح: delete بدون []');
+      if (!obj || obj.root !== obj) this.err(`delete '${e.e.s}': not a block allocated with new`);
+      if (e.arr) this.event('use delete, not delete[]');
     }
-    if (!obj.heap) this.err(`💥 delete '${e.e.s}': المؤشر يشير إلى متغير في الـ Stack وليس إلى ذاكرة محجوزة بـ new`);
-    if (!obj.alive) this.err(`💥 Double free: تحرير نفس الذاكرة مرتين عبر '${e.e.s}' — هذه الذاكرة حُرّرت مسبقاً`);
+    if (!obj.heap) this.err(`delete '${e.e.s}': memory was not allocated with new`);
+    if (!obj.alive) this.err(`Double free through '${e.e.s}'`);
     const runDtor = (c: Cell) => {
       if (c.t.k === 'struct') {
         const sd = this.sd(c.t.name);
@@ -1947,38 +1947,38 @@ export class Interp {
     };
     runDtor(obj);
     this.killCell(obj);
-    this.event(`🗑 delete ${e.e.s} ← تحرير ${typeName(obj.t)} عند ${hex(obj.addr)} من الـ Heap. انتبه: ${e.e.s} ما زال يحمل العنوان القديم (مؤشر معلّق dangling) — يُفضّل جعله nullptr`);
+    this.event(`delete ${e.e.s}`);
   }
 
   // =================== statements ===================
   declareVar(ts: TypeSpec, d: Declarator, region: 'stack' | 'global', scope: Map<string, Cell> | null, dispName?: string): Cell {
-    const dims: (number | null)[] = d.dims.map((x) => (x == null ? null : this.toInt(this.ev(x), 'حجم المصفوفة')));
+    const dims: (number | null)[] = d.dims.map((x) => (x == null ? null : this.toInt(this.ev(x), 'array size')));
     if (dims.length && dims[0] === null) {
       if (d.braceInit) dims[0] = d.braceInit.length;
       else if (d.init && d.init.t === 'str') dims[0] = d.init.v.length + 1;
-      else this.err(`حجم المصفوفة ${d.name} غير محدد`);
+      else this.err(`Size of array ${d.name} is unknown`);
     }
-    for (const x of dims) if ((x as number) < 0) this.err(`💥 حجم مصفوفة سالب (${x})`);
+    for (const x of dims) if ((x as number) < 0) this.err(`Negative array size (${x})`);
     let t: Type;
     let pre: RV | undefined;
     let refTarget: Cell | undefined;
     if (ts.base === 'auto') {
-      if (!d.init) this.err(`المتغير auto ${d.name} يحتاج قيمة ابتدائية`);
+      if (!d.init) this.err(`auto ${d.name} needs an initializer`);
       if (d.ref || ts.ref) {
         refTarget = this.evalLorTemp(d.init);
         t = { k: 'ref', to: refTarget.t };
       } else {
         pre = this.ev(d.init);
         t = pre.t.k === 'nullptr' ? { k: 'ptr', to: VOID } : pre.t;
-        if (t.k === 'initlist') this.err('auto مع {} غير مدعوم');
-        for (let i = 0; i < d.ptr; i++) if (t.k !== 'ptr') this.err('auto* يحتاج مؤشراً');
+        if (t.k === 'initlist') this.err('auto with {} is not supported');
+        for (let i = 0; i < d.ptr; i++) if (t.k !== 'ptr') this.err('auto* needs a pointer');
       }
     } else t = this.tsType(ts, d.ptr, dims as number[], d.ref);
-    if (t.k === 'prim' && t.name === 'void') this.err(`لا يمكن تعريف متغير من نوع void (${d.name})`);
+    if (t.k === 'prim' && t.name === 'void') this.err(`Variable ${d.name} declared void`);
     const cell = region === 'global' ? this.allocGlobal(t) : this.allocStack(t);
     cell.name = dispName ?? d.name;
     if (scope) {
-      if (scope.has(d.name) && region === 'stack') this.err(`المتغير '${d.name}' معرّف مسبقاً في نفس النطاق (redeclaration)`);
+      if (scope.has(d.name) && region === 'stack') this.err(`Redeclaration of '${d.name}'`);
       scope.set(d.name, cell);
     }
     if (refTarget) { cell.v = refTarget; cell.init = true; }
@@ -1989,7 +1989,7 @@ export class Interp {
   initVar(c: Cell, d: Declarator, pre: RV | undefined, zero: boolean) {
     const t = c.t;
     if (t.k === 'ref') {
-      if (!d.init) this.err(`المرجع (reference) '${d.name}' يجب تهيئته عند التعريف`);
+      if (!d.init) this.err(`Reference '${d.name}' must be initialized`);
       c.v = this.evalLorTemp(d.init);
       c.init = true;
       return;
@@ -2020,17 +2020,17 @@ export class Interp {
 
   declNote(c: Cell, d: Declarator): string {
     const tn = typeName(c.t);
-    if (c.t.k === 'ref') return `تعريف مرجع (reference) ${tn} ${d.name} ← اسم آخر لـ ${this.label(c.v)}`;
+    if (c.t.k === 'ref') return `${tn} ${d.name}`;
     if (c.t.k === 'ptr') {
-      if (!c.init) return `تعريف مؤشر ${tn} ${d.name} بدون قيمة ⚠ (غير مُهيأ — يحمل عنواناً عشوائياً)`;
-      if (c.v === null) return `تعريف مؤشر ${tn} ${d.name} = nullptr`;
-      if (c.v.target) return `تعريف مؤشر ${tn} ${d.name} ← يشير إلى ${this.label(c.v.target)}`;
+      if (!c.init) return `${tn} ${d.name}`;
+      if (c.v === null) return `${tn} ${d.name} = nullptr`;
+      if (c.v.target) return `${tn} ${d.name} → ${this.label(c.v.target)}`;
     }
-    if (c.t.k === 'struct') return `إنشاء كائن ${tn} ${d.name} في الـ Stack`;
-    if (c.t.k === 'array') return `تعريف مصفوفة ${tn} ${d.name} في الـ Stack (${c.v.length} عناصر متتالية في الذاكرة)`;
-    if (c.t.k === 'vector') return `تعريف ${tn} ${d.name} (عدد العناصر ${c.v.length})`;
-    if (!c.init) return `تعريف ${tn} ${d.name} بدون قيمة ابتدائية ⚠ (غير مُهيأ)`;
-    return `تعريف ${tn} ${d.name} = ${this.dispCell(c)}`;
+    if (c.t.k === 'struct') return `${tn} ${d.name}`;
+    if (c.t.k === 'array') return `${tn} ${d.name}`;
+    if (c.t.k === 'vector') return `${tn} ${d.name}`;
+    if (!c.init) return `${tn} ${d.name}`;
+    return `${tn} ${d.name} = ${this.dispCell(c)}`;
   }
 
   pushScope() {
@@ -2112,13 +2112,13 @@ export class Interp {
       case 'expr': {
         this.ev(s.e);
         this.setLine(s.line);
-        this.snap('step', s.line, `تنفيذ السطر ${s.line}`);
+        this.snap('step', s.line, `line ${s.line}`);
         return;
       }
       case 'if': {
         const c = this.cond(s.c);
         this.setLine(s.line);
-        this.snap('step', s.line, `الشرط (${s.cs}) ← ${c ? 'true ✔ ندخل إلى جسم if' : s.els ? 'false ✘ ننتقل إلى else' : 'false ✘ نتخطى جسم if'}`);
+        this.snap('step', s.line, `if (${s.cs}) → ${c ? 'true' : 'false'}`);
         if (c) this.execStmt(s.then);
         else if (s.els) this.execStmt(s.els);
         return;
@@ -2129,7 +2129,7 @@ export class Interp {
           this.setLine(s.line);
           const c = this.cond(s.c);
           this.setLine(s.line);
-          this.snap('step', s.line, `شرط while (${s.cs}) ← ${c ? `true ✔ تنفيذ جسم الحلقة (التكرار رقم ${iter + 1})` : 'false ✘ انتهت الحلقة'}`);
+          this.snap('step', s.line, `while (${s.cs}) → ${c ? 'true' : 'false'}`);
           if (!c) break;
           iter++;
           if (this.execLoopBody(s.body) === 'break') break;
@@ -2142,7 +2142,7 @@ export class Interp {
           this.setLine(s.endLine);
           const c = this.cond(s.c);
           this.setLine(s.endLine);
-          this.snap('step', s.endLine, `شرط do-while (${s.cs}) ← ${c ? 'true ✔ نعيد تنفيذ الجسم' : 'false ✘ انتهت الحلقة'}`);
+          this.snap('step', s.endLine, `while (${s.cs}) → ${c ? 'true' : 'false'}`);
           if (!c) break;
         }
         return;
@@ -2156,8 +2156,8 @@ export class Interp {
             this.setLine(s.line);
             const c = s.c ? this.cond(s.c) : true;
             this.setLine(s.line);
-            const stepTxt = !first && s.ss ? `بعد ${s.ss}: ` : '';
-            this.snap('step', s.line, `${stepTxt}شرط for (${s.cs || 'دائماً true'}) ← ${c ? 'true ✔ تنفيذ جسم الحلقة' : 'false ✘ انتهت الحلقة'}`);
+            const stepTxt = !first && s.ss ? `${s.ss}; ` : '';
+            this.snap('step', s.line, `${stepTxt}for (${s.cs || 'true'}) → ${c ? 'true' : 'false'}`);
             if (!c) break;
             first = false;
             if (this.execLoopBody(s.body) === 'break') break;
@@ -2173,12 +2173,12 @@ export class Interp {
       case 'forrange': {
         const coll = this.evalLorTemp(s.e);
         const ck = coll.t.k;
-        if (ck !== 'array' && ck !== 'vector' && ck !== 'string') this.err(`لا يمكن المرور على '${s.es}' بحلقة for-each (نوعه ${typeName(coll.t)})`);
+        if (ck !== 'array' && ck !== 'vector' && ck !== 'string') this.err(`Cannot iterate over '${s.es}' (${typeName(coll.t)})`);
         const len = () => (ck === 'string' ? coll.v.length : coll.v.length);
         let i = 0;
         while (true) {
           this.setLine(s.line);
-          if (i >= len()) { this.snap('step', s.line, `انتهت حلقة for-each على ${s.es}`); break; }
+          if (i >= len()) { this.snap('step', s.line, `end for (${s.es})`); break; }
           const el: Cell = ck === 'string' ? this.charProxy(coll, i) : coll.v[i];
           this.pushScope();
           let et: Type = el.t;
@@ -2188,7 +2188,7 @@ export class Interp {
           cell.name = s.d.name;
           this.curScope().set(s.d.name, cell);
           if (isRef) { cell.v = el; cell.init = true; } else this.store(cell, this.read(el));
-          this.snap('step', s.line, `for-each: العنصر رقم ${i} ← ${s.d.name} = ${this.dispCell(cell)}${isRef ? ' (مرجع للعنصر الأصلي)' : ' (نسخة)'}`);
+          this.snap('step', s.line, `${s.d.name} = ${this.dispCell(cell)}`);
           let r: string | null;
           try { r = this.execLoopBody(s.body); } catch (e) { throw e; }
           this.popScope();
@@ -2199,7 +2199,7 @@ export class Interp {
       }
       case 'switch': {
         const v = this.ev(s.c);
-        const key = v.t.k === 'prim' ? v.v : this.err('switch يعمل مع الأعداد والأحرف فقط');
+        const key = v.t.k === 'prim' ? v.v : this.err('switch needs an integer or char');
         let start = -1;
         let lbl = '';
         for (const lb of s.labels) {
@@ -2212,7 +2212,7 @@ export class Interp {
           if (dl) { start = dl.idx; lbl = 'default'; }
         }
         this.setLine(s.line);
-        this.snap('step', s.line, `switch (${s.cs}) = ${this.fmtRV(v)} ← ${start < 0 ? 'لا يوجد case مطابق' : `الانتقال إلى ${lbl}`}`);
+        this.snap('step', s.line, `switch (${s.cs}) = ${this.fmtRV(v)} → ${start < 0 ? 'no match' : lbl}`);
         if (start >= 0) {
           this.pushScope();
           try {
@@ -2228,10 +2228,10 @@ export class Interp {
         return;
       }
       case 'break':
-        this.snap('step', s.line, 'break ← الخروج فوراً من الحلقة / switch');
+        this.snap('step', s.line, 'break');
         throw new BreakSig();
       case 'continue':
-        this.snap('step', s.line, 'continue ← تخطي بقية الجسم والانتقال للتكرار التالي');
+        this.snap('step', s.line, 'continue');
         throw new ContinueSig();
       case 'return': {
         const fr = this.frame!;
@@ -2253,11 +2253,11 @@ export class Interp {
         }
         this.setLine(s.line);
         const isMain = fr.fn.name === 'main' && !fr.fn.cls;
-        this.snap('return', s.line, s.e ? `↩ return ${s.es}${rv && rv.t.k !== 'initlist' ? ` ← القيمة المُعادة = ${this.fmtRV(rv)}` : ''}${isMain ? ' — انتهاء البرنامج' : ''}` : '↩ return — الخروج من الدالة');
+        this.snap('return', s.line, s.e ? `↩ return ${s.es}${rv && rv.t.k !== 'initlist' ? ` → ${this.fmtRV(rv)}` : ''}${isMain ? '' : ''}` : 'return');
         throw new ReturnSig(rv);
       }
     }
-    this.err('جملة غير مدعومة: ' + s.t);
+    this.err('Unsupported statement: ' + s.t);
   }
 
   // =================== run ===================
@@ -2289,44 +2289,44 @@ export class Interp {
         this.curLine = st.line;
         const parts: string[] = [];
         for (const d of st.decls) {
-          if (this.globals.has(d.name)) this.err(`المتغير العام '${d.name}' معرّف مسبقاً`);
+          if (this.globals.has(d.name)) this.err(`Redeclaration of global '${d.name}'`);
           const c = this.declareVar(st.ts, d, 'global', this.globals);
           this.globalOrder.push(c);
-          parts.push(this.declNote(c, d) + (!d.init && !d.braceInit && !d.ctorArgs && c.t.k !== 'struct' ? ' (المتغيرات العامة تبدأ بصفر/nullptr تلقائياً)' : ''));
+          parts.push(this.declNote(c, d) + (!d.init && !d.braceInit && !d.ctorArgs && c.t.k !== 'struct' ? '' : ''));
         }
-        this.snap('step', st.line, '🌐 متغير عام: ' + parts.join('\n'));
+        this.snap('step', st.line, '' + parts.join('\n'));
       }
       const mains = this.prog.funcs.get('main');
       const main = mains?.find((m) => m.body);
-      if (!main) this.err('لا توجد دالة main() في البرنامج', 1);
+      if (!main) this.err('No main() function', 1);
       const r = this.callFunction(main, [], null);
       const leaks = this.heapList.filter((h) => h.alive);
       const code = r && r.t.k === 'prim' ? r.v : 0;
-      let note = `✅ انتهى البرنامج (main أعادت ${code})`;
-      if (leaks.length) note += `\n⚠ تبقّى ${leaks.length} كائن في الـ Heap لم يُحرَّر بـ delete (تسرّب ذاكرة memory leak)`;
+      let note = `exit ${code}`;
+      if (leaks.length) note += `\n${leaks.length} leaked`;
       this.snap('end', main.endLine, note, true);
     } catch (e) {
       if (e instanceof ExitSig) {
-        this.snap('end', this.curLine, `✅ انتهى البرنامج باستدعاء exit(${e.code})`, true);
+        this.snap('end', this.curLine, `exit(${e.code})`, true);
       } else if (e instanceof StopSig) {
         const s = this.serialize(e.kind, this.curLine, e.msg, this.flushEvents());
         if (e.kind === 'error') s.error = e.msg;
         this.snaps.push(s);
       } else if (e instanceof CppError) {
-        const s = this.serialize('error', e.line || this.curLine, '❌ خطأ أثناء التشغيل', this.flushEvents());
+        const s = this.serialize('error', e.line || this.curLine, 'runtime error', this.flushEvents());
         s.error = e.message;
         this.snaps.push(s);
       } else if (e instanceof RangeError) {
-        const s = this.serialize('error', this.curLine, '❌ خطأ', this.flushEvents());
-        s.error = '💥 Stack overflow: تكرار (recursion) عميق جداً';
+        const s = this.serialize('error', this.curLine, 'error', this.flushEvents());
+        s.error = 'Stack overflow: recursion too deep';
         this.snaps.push(s);
       } else if (e instanceof BreakSig || e instanceof ContinueSig) {
-        const s = this.serialize('error', this.curLine, '❌ خطأ', []);
-        s.error = 'break/continue خارج حلقة أو switch';
+        const s = this.serialize('error', this.curLine, 'error', []);
+        s.error = 'break/continue outside of a loop or switch';
         this.snaps.push(s);
       } else {
-        const s = this.serialize('error', this.curLine, '❌ خطأ داخلي', []);
-        s.error = 'خطأ داخلي في المُصوِّر: ' + (e as Error)?.message;
+        const s = this.serialize('error', this.curLine, 'internal error', []);
+        s.error = 'Internal error: ' + (e as Error)?.message;
         this.snaps.push(s);
         // eslint-disable-next-line no-console
         console.error(e);
@@ -2337,7 +2337,7 @@ export class Interp {
   flushEvents(): string[] {
     const evs = this.events;
     this.events = [];
-    if (this.printed) { evs.push(`🖨 طباعة: «${this.printed.replace(/\u0001|\u0002/g, '').replace(/\n/g, '⏎')}»`); this.printed = ''; }
+    if (this.printed) { evs.push(`output: «${this.printed.replace(/\u0001|\u0002/g, '').replace(/\n/g, '⏎')}»`); this.printed = ''; }
     return evs;
   }
 }
@@ -2348,7 +2348,7 @@ export function runProgram(src: string, input: string, maxSteps = 3000): RunResu
     prog = parseProgram(src);
   } catch (e) {
     if (e instanceof CppError) return { snaps: [], parseError: { msg: e.message, line: e.line } };
-    return { snaps: [], parseError: { msg: 'خطأ داخلي في المحلل: ' + (e as Error).message, line: 0 } };
+    return { snaps: [], parseError: { msg: 'Internal parser error: ' + (e as Error).message, line: 0 } };
   }
   const it = new Interp(prog, input, maxSteps);
   it.run();
