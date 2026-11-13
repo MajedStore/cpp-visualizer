@@ -382,7 +382,14 @@ export class Interp {
     let x: Cell | undefined = c;
     while (x && x !== root) { keys.unshift(x.key!); x = x.parent; }
     const path = keys.map((k) => (typeof k === 'number' ? `[${k}]` : `.${k}`)).join('');
-    if (root.heap) return `${typeName(root.t)}@${hex(root.addr)}${path}` + (path ? '' : ' (في الـ Heap)');
+    if (root.heap) {
+      let name = typeName(root.t);
+      if (root.t.k === 'struct') {
+        const first = Object.values(root.v as Record<string, Cell>).find((f) => f.t.k === 'prim' || f.t.k === 'string');
+        name += first && first.init ? `(${first.t.k === 'string' ? JSON.stringify(first.v) : this.fmtPrim(first.v, first.t.name)})` : ' الجديدة';
+      } else if (root.t.k === 'array') name = `مصفوفة ${typeName(root.t.of)}[${root.t.n}]`;
+      return name + path;
+    }
     if (c.proxy) return 'حرف داخل string';
     return `${root.name ?? 'كائن مؤقت'}${path}`;
   }
@@ -1381,10 +1388,10 @@ export class Interp {
     });
     const plist = parts.join('، ');
     let note: string;
-    if (fn.isCtor) note = `📦 استدعاء الـ constructor ${name}(${plist}) لتهيئة الكائن الجديد — this يشير إلى الكائن`;
+    if (fn.isCtor) note = `📦 تشغيل الـ constructor ${fn.cls}(${plist}) لتجهيز ${fn.cls} الجديدة`;
     else if (fn.isDtor) note = `🧹 استدعاء الـ destructor ${name}() قبل تحرير الكائن`;
     else if (fn.name === 'main' && !fn.cls) note = '▶ بدء تنفيذ الدالة main()';
-    else note = `📞 استدعاء الدالة ${name}(${plist}) — إنشاء إطار (frame) جديد في الـ Stack`;
+    else note = `📞 الدخول إلى الدالة ${name}(${plist})`;
     this.curLine = fn.line;
     this.snap('call', fn.line, note);
     let ret: RV | undefined;
@@ -1394,7 +1401,7 @@ export class Interp {
       frame.line = fn.endLine;
       this.curLine = fn.endLine;
       if (fn.name === 'main' && !fn.cls) ret = { t: INT, v: 0 };
-      else this.snap('return', fn.endLine, `↩ نهاية ${name} — حذف إطارها من الـ Stack والعودة إلى المُستدعي`);
+      else this.snap('return', fn.endLine, fn.isCtor ? `✔ انتهى الـ constructor — ${fn.cls} جاهزة` : `↩ انتهت ${name} — نرجع إلى المكان الذي استدعاها`);
     } catch (e) {
       if (e instanceof ReturnSig) ret = e.v;
       else throw e;
@@ -1909,7 +1916,7 @@ export class Interp {
       return { t: { k: 'ptr', to: et }, v: n ? { target: c.v[0], base: c, idx: 0 } : { target: null, base: c, idx: 0 } };
     }
     const c = this.allocHeap(et);
-    this.event(`🆕 new ${typeName(et)} ← حجز كائن جديد في الـ Heap عند العنوان ${hex(c.addr)}`);
+    this.event(`🆕 new ${typeName(et)} ← إنشاء ${typeName(et)} جديدة في الذاكرة`);
     if (et.k === 'struct') this.constructWith(c, e.args ?? null, !!e.brace, e.args !== undefined);
     else if (e.args !== undefined) this.constructWith(c, e.args, !!e.brace, true);
     return { t: { k: 'ptr', to: et }, v: { target: c } };
@@ -2105,7 +2112,7 @@ export class Interp {
       case 'expr': {
         this.ev(s.e);
         this.setLine(s.line);
-        this.snap('step', s.line, `تنفيذ: ${s.es};`);
+        this.snap('step', s.line, `تنفيذ السطر ${s.line}`);
         return;
       }
       case 'if': {

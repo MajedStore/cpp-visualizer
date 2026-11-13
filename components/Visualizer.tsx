@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodeArea from './CodeArea';
 import MemoryView from './MemoryView';
+import SimpleView from './SimpleView';
 import { runProgram } from '@/lib/cpp/interpreter';
 import type { RunResult, Snapshot } from '@/lib/cpp/types';
 import { EXAMPLES } from '@/lib/examples';
@@ -74,6 +75,7 @@ export default function Visualizer() {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(700);
   const [showAddr, setShowAddr] = useState(false);
+  const [simple, setSimple] = useState(true);
   const [exampleId, setExampleId] = useState<string>('');
   const [toast, setToast] = useState<string>('');
   const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>('auto');
@@ -97,6 +99,7 @@ export default function Visualizer() {
     const th = lsGet(LS_THEME) as any;
     if (th === 'light' || th === 'dark') setTheme(th);
     setShowAddr(lsGet(LS_ADDR) === '1');
+    setSimple(lsGet('cppviz.view') !== 'detail');
     // ?ex=<example-id>&step=<n>  opens an example directly in visualization mode
     const q = new URLSearchParams(window.location.search);
     const ex = EXAMPLES.find((e) => e.id === q.get('ex'));
@@ -318,13 +321,19 @@ export default function Visualizer() {
               <span>🧠 الذاكرة</span>
               <span className="hint">{mode === 'view' && snap ? `سطر ${snap.line}` : ''}</span>
               <span className="spacer" />
-              <label className="hint" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
-                <input type="checkbox" checked={showAddr} onChange={(e) => setShowAddr(e.target.checked)} /> إظهار العناوين
-              </label>
+              <div className="seg" role="tablist">
+                <button className={simple ? 'on' : ''} onClick={() => { setSimple(true); lsSet('cppviz.view', 'simple'); }}>عرض مبسّط</button>
+                <button className={!simple ? 'on' : ''} onClick={() => { setSimple(false); lsSet('cppviz.view', 'detail'); }}>عرض مفصّل</button>
+              </div>
+              {!simple && (
+                <label className="hint" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={showAddr} onChange={(e) => setShowAddr(e.target.checked)} /> العناوين
+                </label>
+              )}
             </div>
             <div className="mem-scroll">
               {mode === 'view' && snap ? (
-                <MemoryView snap={snap} prev={prev} idx={idx} showAddr={showAddr} />
+                simple ? <SimpleView snap={snap} prev={prev} idx={idx} /> : <MemoryView snap={snap} prev={prev} idx={idx} showAddr={showAddr} />
               ) : (
                 <div className="welcome">
                   <h2>كيف تستخدم المُصوِّر؟</h2>
@@ -344,6 +353,16 @@ export default function Visualizer() {
                 </div>
               )}
             </div>
+            {simple ? (
+            <div className="legend">
+              <span><span className="lg-sw" style={{ background: 'var(--sn-ptr)' }} /> مؤشر (مثل head)</span>
+              <span><span className="lg-sw" style={{ background: 'var(--sn-data)' }} /> القيمة (Data)</span>
+              <span><span className="lg-sw" style={{ background: 'var(--sn-next)' }} /> عنوان العقدة التالية (Next)</span>
+              <span><span className="lg-box new" /> عقدة جديدة</span>
+              <span><span className="lg-box chg" /> تغيّرت قيمته</span>
+              <span>؟ = لم تُعطَ قيمة</span>
+            </div>
+            ) : (
             <div className="legend">
               <span><span className="lg-line" /> مؤشر</span>
               <span><span className="lg-line d" /> مؤشر معلّق (بعد delete)</span>
@@ -353,6 +372,7 @@ export default function Visualizer() {
               <span><span className="lg-box chg" /> تغيّرت قيمته</span>
               <span><span className="lg-box leak" /> تسرّب ذاكرة</span>
             </div>
+            )}
           </section>
         </div>
       </main>
